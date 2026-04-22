@@ -1,0 +1,23 @@
+{
+  "keep_list": [
+    "ret_3d",
+    "ret_7d",
+    "ret_14d",
+    "ret_30d",
+    "ret_90d",
+    "vol_30d",
+    "skew_30d",
+    "beta_btc_60d",
+    "vol_ratio_7d",
+    "vol_ratio_14d",
+    "vol_ratio_30d",
+    "atr_14d"
+  ],
+  "redundant_pairs": [
+    [
+      "ret_30d",
+      "reversal_3_30"
+    ]
+  ],
+  "snapshot_id": "aef838a82cb3"
+}

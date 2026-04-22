@@ -1,0 +1,19 @@
+{
+  "rank_ic_mean": 0.0958395036434195,
+  "rank_ic_std": 0.055595863936847706,
+  "rank_ic_median": 0.07630111823660211,
+  "ic_t_stat": 3.854668837560035,
+  "hit_rate_mean": 0.5147764182424917,
+  "hit_rate_std": 0.05343654666373991,
+  "hit_rate_median": 0.5096774193548387,
+  "r2_mean": -0.08753497347103845,
+  "r2_std": 0.11072794919665337,
+  "r2_median": -0.0233434153009191,
+  "n_folds": 5,
+  "model_name": "random_forest",
+  "horizon_days": 7,
+  "n_features": 7,
+  "feature_version": "v1",
+  "snapshot_id": "110ffd67b385",
+  "run_id": "76a6a1e0"
+}

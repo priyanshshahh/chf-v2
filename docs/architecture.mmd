@@ -1,0 +1,76 @@
+flowchart TD
+    subgraph DATA_SOURCES["External Data Sources"]
+        CG["CoinGecko API\n/coins/markets\n(free, no key)"]
+        BN["Binance / CCXT\nOHLCV 1d\n(free, no key)"]
+        CM["CoinMetrics\nCommunity API\n(free, no key)"]
+        DL["DeFiLlama API\nTVL data\n(free, no key)"]
+    end
+
+    subgraph AGENTS["Agent Pipeline"]
+        UA["UniverseAgent\nTop-100 filter\nmonthly snapshot"]
+        MDA["MarketDataAgent\nOHLCV backfill\nhive-partitioned Parquet"]
+        OCA["OnChainAgent\nNVT, MVRV, AdrAct\nTVL"]
+        FA["FeatureAgent\n15+ features\nnumba beta kernel"]
+        LA["LabelAgent\nfwd_return_7d\nno look-ahead"]
+        MA["ModelAgent\nRF + LightGBM\nMLflow tracking"]
+        PA["PortfolioAgent\nTop-K EW\nScore-prop"]
+        BA["BacktestAgent\nvectorbt engine\nEW-100 benchmark"]
+    end
+
+    subgraph STORAGE["Storage Layer"]
+        RAW["data/raw/\nmarket/year=YYYY/month=MM/\nuniverse/\nonchain/"]
+        FEAT["data/features/\nfeature_store.parquet"]
+        LABELS["data/labels/\nlabels_7d.parquet"]
+        PREDS["data/predictions/\npredictions_*.parquet"]
+        ALLOC["data/allocations/\nallocations_*.parquet"]
+        BT["data/backtests/\nequity_curves.parquet\nbacktest_summary.parquet\nvbt_stats.json"]
+        MLFLOW["mlruns/\nMLflow experiments\nmodel artifacts"]
+    end
+
+    subgraph SERVING["Serving Layer"]
+        API["FastAPI\nREST endpoints\n:8000"]
+        DASH["Streamlit Dashboard\n6 views\n:8501"]
+        SCHED["APScheduler\ndaily data\nmonthly retrain"]
+    end
+
+    CG --> UA
+    BN --> MDA
+    CM --> OCA
+    DL --> OCA
+
+    UA --> RAW
+    MDA --> RAW
+    OCA --> RAW
+
+    RAW --> FA
+    FA --> FEAT
+    FEAT --> LA
+    LA --> LABELS
+
+    FEAT --> MA
+    LABELS --> MA
+    MA --> PREDS
+    MA --> MLFLOW
+
+    PREDS --> PA
+    PA --> ALLOC
+
+    ALLOC --> BA
+    RAW --> BA
+    BA --> BT
+
+    BT --> DASH
+    FEAT --> DASH
+    PREDS --> DASH
+    ALLOC --> DASH
+    MLFLOW --> DASH
+
+    SCHED --> UA
+    SCHED --> MDA
+    SCHED --> MA
+
+    API --> UA
+    API --> MDA
+    API --> FA
+    API --> MA
+    API --> BA

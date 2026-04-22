@@ -1,0 +1,186 @@
+# CHF — Mini Hedge Fund Crypto Portfolio
+# Master Run Configuration
+# All parameters are config-driven for full reproducibility.
+
+project:
+  name: "CHF"
+  version: "1.0.0"
+  description: "Mini Hedge Fund Crypto Portfolio with ML/AI, Vectorized Backtesting & Agent Automation"
+  seed: 42
+
+paths:
+  data_root: "data"
+  raw: "data/raw"
+  staged: "data/staged"
+  cleaned: "data/cleaned"
+  features: "data/features"
+  labels: "data/labels"
+  predictions: "data/predictions"
+  allocations: "data/allocations"
+  backtests: "data/backtests"
+  reports: "data/reports"
+  artifacts: "artifacts"
+  metadata: "metadata"
+  mlruns: "mlruns"
+
+universe:
+  top_n: 100
+  rebalance_frequency: "monthly"
+  min_history_days: 90
+  min_daily_volume_usd: 1_000_000
+  exclude_stablecoins: true
+  exclude_wrapped: true
+  exclude_synthetic: true
+  stablecoin_keywords:
+    - "usd"
+    - "usdt"
+    - "usdc"
+    - "dai"
+    - "busd"
+    - "tusd"
+    - "frax"
+    - "lusd"
+    - "susd"
+    - "eur"
+    - "gbp"
+    - "stablecoin"
+  wrapped_keywords:
+    - "wrapped"
+    - "wbtc"
+    - "weth"
+    - "renbtc"
+    - "hbtc"
+
+market_data:
+  exchange: "binance"
+  timeframe: "1d"
+  quote_currency: "USDT"
+  backfill_days: 730
+  retry_attempts: 5
+  retry_backoff_base: 2.0
+  rate_limit_sleep: 1.0
+  benchmarks:
+    - "BTC"
+    - "ETH"
+
+on_chain:
+  coinmetrics_base_url: "https://community-api.coinmetrics.io/v4"
+  defillama_base_url: "https://api.llama.fi"
+  metrics:
+    - "AdrActCnt"       # Active addresses
+    - "TxCnt"           # Transaction count
+    - "CapRealUSD"      # Realized cap
+    - "CapMVRVCur"      # MVRV ratio
+    - "NVTAdj"          # NVT adjusted
+    - "FeeTotUSD"       # Total fees
+    - "IssTotUSD"       # Issuance
+  graceful_fallback: true
+
+features:
+  return_windows: [3, 7, 14, 30, 90]
+  volatility_window: 30
+  beta_window: 60
+  skewness_window: 30
+  volume_windows: [7, 14, 30]
+  winsorize_lower: 0.01
+  winsorize_upper: 0.99
+  zscore_cross_sectional: true
+  correlation_threshold: 0.85
+  vif_threshold: 10.0
+  feature_version: "v1"
+
+labels:
+  horizons:
+    - 7    # 1 week
+    - 14   # 2 weeks
+    - 30   # 1 month
+  label_type: "log_return"
+  drop_incomplete: true
+
+modeling:
+  models:
+    - "random_forest"
+    - "lightgbm"
+  default_horizon: 7
+  walk_forward:
+    initial_train_months: 12
+    step_months: 1
+    embargo_days: 7
+  hyperparameter_tuning: false
+  n_optuna_trials: 30
+  cv_metric: "rank_ic"
+  random_forest:
+    n_estimators: 200
+    max_depth: 6
+    min_samples_leaf: 20
+    n_jobs: -1
+  lightgbm:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: 6
+    num_leaves: 31
+    min_child_samples: 20
+    n_jobs: -1
+    verbose: -1
+
+portfolio:
+  strategies:
+    - "top_k_equal_weight"
+    - "score_proportional"
+  default_strategy: "top_k_equal_weight"
+  top_k_values: [5, 10, 20]
+  default_top_k: 10
+  max_weight: 0.10
+  rebalance_frequency: "weekly"
+  long_only: true
+  positive_signal_filter: true
+  transaction_cost_bps: 20
+
+backtesting:
+  initial_capital: 100_000
+  transaction_cost_bps: 20
+  cost_sweep_bps: [10, 20, 30, 50]
+  k_sweep: [5, 10, 20]
+  rebalance_frequencies: ["weekly", "biweekly", "monthly"]
+  benchmarks:
+    - "BTC"
+    - "ETH"
+    - "BTC_ETH_50_50"
+    - "top100_equal_weight"
+  subperiods:
+    - name: "bull_2021"
+      start: "2021-01-01"
+      end: "2021-11-01"
+    - name: "bear_2022"
+      start: "2022-01-01"
+      end: "2022-12-31"
+    - name: "recovery_2023"
+      start: "2023-01-01"
+      end: "2023-12-31"
+    - name: "bull_2024"
+      start: "2024-01-01"
+      end: "2024-12-31"
+
+mlflow:
+  tracking_uri: "mlruns"
+  experiment_name: "CHF_experiments"
+  log_artifacts: true
+
+scheduler:
+  universe_update_cron: "0 2 1 * *"    # 1st of month at 02:00
+  market_data_cron: "0 6 * * *"        # Daily at 06:00
+  on_chain_cron: "0 7 * * *"           # Daily at 07:00
+  feature_cron: "0 8 * * *"            # Daily at 08:00
+  model_cron: "0 10 1 * *"             # 1st of month at 10:00
+  portfolio_cron: "0 12 * * 1"         # Every Monday at 12:00
+  backtest_cron: "0 14 1 * *"          # 1st of month at 14:00
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+
+dashboard:
+  port: 8501
+  theme: "dark"
+  title: "CHF — Crypto Hedge Fund Dashboard"

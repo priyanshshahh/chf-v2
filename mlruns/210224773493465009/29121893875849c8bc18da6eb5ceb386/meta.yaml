@@ -1,0 +1,14 @@
+artifact_uri: /Users/priyansh/Desktop/manus chf/chf/mlruns/210224773493465009/29121893875849c8bc18da6eb5ceb386/artifacts
+end_time: 1776551811038
+entry_point_name: ''
+experiment_id: '210224773493465009'
+lifecycle_stage: active
+run_id: 29121893875849c8bc18da6eb5ceb386
+run_name: burly-tern-574
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776551807552
+status: 3
+tags: []
+user_id: priyansh

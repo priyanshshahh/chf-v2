@@ -1,0 +1,16 @@
+{
+  "snapshot_id": "ef99f651457f",
+  "run_id": "261b131f",
+  "symbols_with_data": [
+    "TRX",
+    "HBAR",
+    "DOT",
+    "ICP",
+    "ATOM",
+    "VET",
+    "CRV"
+  ],
+  "start_date": "2024-04-10",
+  "end_date": "2026-04-10",
+  "created_at": "2026-04-10T21:05:47.916306+00:00"
+}
