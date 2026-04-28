@@ -8,9 +8,11 @@ Supports:
   - Main strategy backtest (Top-K equal-weight)
   - EW Top-100 benchmark (equal-weight all universe assets, monthly rebalanced)
   - BTC buy-and-hold benchmark
+  - ETH buy-and-hold benchmark
   - Cost sweep (10, 20, 30, 50 bps)
   - K sweep (5, 10, 20)
   - Subperiod analysis
+  - Risk-adjusted alpha report versus benchmarks
 
 Mathematical Definitions:
 ─────────────────────────
@@ -33,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from agents.base import AgentBase
+from reports import evaluate_risk_adjusted_alpha, render_alpha_report_markdown
 
 # ── VectorBT import with graceful fallback ──────────────────────────────────
 try:
@@ -57,6 +60,8 @@ class BacktestAgent(AgentBase):
     - data/backtests/backtest_summary.parquet
     - data/backtests/backtest_summary.json
     - data/backtests/vbt_stats.json
+    - data/reports/alpha_report.json
+    - data/reports/alpha_report.md
 
     Run command
     -----------
@@ -123,9 +128,11 @@ class BacktestAgent(AgentBase):
         )
         results["main"] = {"equity": main_equity, "summary": main_summary, "vbt_stats": main_vbt}
 
-        # BTC buy-and-hold benchmark
+        # BTC and ETH buy-and-hold benchmarks
         btc_eq, btc_s = self._run_btc_benchmark(initial_capital)
         results["benchmark_BTC"] = {"equity": btc_eq, "summary": btc_s}
+        eth_eq, eth_s = self._run_eth_benchmark(initial_capital)
+        results["benchmark_ETH"] = {"equity": eth_eq, "summary": eth_s}
 
         # EW Top-100 benchmark (PDF spec §9, §12 — Rigorous Benchmarking)
         ew_eq, ew_s = self._run_ew_top100_benchmark(initial_capital, cost_bps)
@@ -318,6 +325,21 @@ class BacktestAgent(AgentBase):
         summary = self._compute_performance_metrics(btc[cols], initial_capital, 0.0, "benchmark_BTC")
         return btc[cols], summary
 
+    def _run_eth_benchmark(self, initial_capital: float) -> Tuple[pd.DataFrame, Dict]:
+        """100% ETH buy-and-hold."""
+        if self._market_df is None:
+            return pd.DataFrame(), {}
+        eth = self._market_df[self._market_df["symbol"].isin(["ETH", "ETHUSDT"])].copy()
+        if eth.empty:
+            return pd.DataFrame(), {}
+        eth = eth.sort_values("date_ts")
+        eth["daily_return"] = eth["close"].pct_change().fillna(0)
+        eth["portfolio_value"] = initial_capital * (1 + eth["daily_return"]).cumprod()
+        eth["backtest_name"] = "benchmark_ETH"
+        cols = ["date_ts", "portfolio_value", "daily_return", "backtest_name"]
+        summary = self._compute_performance_metrics(eth[cols], initial_capital, 0.0, "benchmark_ETH")
+        return eth[cols], summary
+
     # ── EW Top-100 benchmark ─────────────────────────────────────────────
 
     def _run_ew_top100_benchmark(
@@ -490,6 +512,7 @@ class BacktestAgent(AgentBase):
             equity_all.to_parquet(equity_path, index=False)
             self.output_paths["equity_curves"] = str(equity_path)
 
+        summary_df = pd.DataFrame()
         if summaries:
             summary_df = pd.DataFrame(summaries)
             summary_path = bt_dir / "backtest_summary.parquet"
@@ -503,6 +526,17 @@ class BacktestAgent(AgentBase):
             vbt_path = bt_dir / "vbt_stats.json"
             with open(vbt_path, "w") as f:
                 json.dump(vbt_stats_all, f, indent=2, default=str)
+
+        if equity_dfs and not summary_df.empty:
+            reports_dir = self.get_path("reports")
+            report = evaluate_risk_adjusted_alpha(equity_all, summary_df)
+            report_json_path = reports_dir / "alpha_report.json"
+            with open(report_json_path, "w") as f:
+                json.dump(report, f, indent=2, default=str)
+            report_md_path = reports_dir / "alpha_report.md"
+            report_md_path.write_text(render_alpha_report_markdown(report))
+            self.output_paths["alpha_report_json"] = str(report_json_path)
+            self.output_paths["alpha_report_md"] = str(report_md_path)
 
         self.logger.info(
             f"BacktestAgent persisted | snapshot_id={self.snapshot_id} | vbt={_VBT_AVAILABLE}"

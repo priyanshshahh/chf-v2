@@ -24,7 +24,7 @@ class UniverseAgent(AgentBase):
     Outputs: data/raw/universe/universe_YYYYMM.parquet
              data/raw/universe/exclusions_YYYYMM.parquet
     """
-
+¸
     def __init__(self, config: Optional[Dict[str, Any]] = None, snapshot_date: Optional[str] = None):
         super().__init__(config)
         self.snapshot_date = snapshot_date or datetime.now(timezone.utc).strftime("%Y-%m")

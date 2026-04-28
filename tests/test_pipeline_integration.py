@@ -72,6 +72,8 @@ def test_pipeline_agents_run_end_to_end_from_market_data(tmp_path):
         tmp_path / "data" / "allocations" / "latest_allocation.parquet",
         tmp_path / "data" / "backtests" / "backtest_summary.parquet",
         tmp_path / "data" / "backtests" / "equity_curves.parquet",
+        tmp_path / "data" / "reports" / "alpha_report.json",
+        tmp_path / "data" / "reports" / "alpha_report.md",
     ]
 
     for expected in expected_outputs:
@@ -88,3 +90,6 @@ def test_pipeline_agents_run_end_to_end_from_market_data(tmp_path):
     summary_df = pd.read_parquet(tmp_path / "data" / "backtests" / "backtest_summary.parquet")
     assert {"backtest_name", "cagr", "sharpe", "max_drawdown"}.issubset(summary_df.columns)
     assert "main" in set(summary_df["backtest_name"])
+    assert {"benchmark_BTC", "benchmark_ETH", "benchmark_EW_top100"}.issubset(
+        set(summary_df["backtest_name"])
+    )

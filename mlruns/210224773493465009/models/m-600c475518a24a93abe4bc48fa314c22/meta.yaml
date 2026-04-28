@@ -1,0 +1,10 @@
+artifact_location: /Users/priyansh/Desktop/manus chf/chf/mlruns/210224773493465009/models/m-600c475518a24a93abe4bc48fa314c22/artifacts
+creation_timestamp: 1776901796556
+experiment_id: '210224773493465009'
+last_updated_timestamp: 1776901804254
+model_id: m-600c475518a24a93abe4bc48fa314c22
+model_type: null
+name: random_forest_h7
+source_run_id: e5686a7d33004b79af28bf33e264c486
+status: 2
+status_message: null

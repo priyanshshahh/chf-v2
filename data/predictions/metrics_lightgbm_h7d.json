@@ -1,11 +1,1 @@
-{
-  "model_name": "lightgbm",
-  "horizon_days": 7,
-  "rank_ic_mean": 0.08,
-  "rank_ic_std": 0.03,
-  "hit_rate_mean": 0.57,
-  "n_folds": 1,
-  "feature_version": "demo",
-  "snapshot_id": "demo",
-  "run_id": "demo"
-}
+{}

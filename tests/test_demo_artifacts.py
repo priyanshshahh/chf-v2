@@ -31,6 +31,8 @@ def test_demo_artifacts_match_dashboard_and_api_contracts(tmp_path):
         tmp_path / "data" / "allocations" / "allocations_transaction_log.parquet",
         tmp_path / "data" / "backtests" / "backtest_summary.parquet",
         tmp_path / "data" / "backtests" / "equity_curves.parquet",
+        tmp_path / "data" / "reports" / "alpha_report.json",
+        tmp_path / "data" / "reports" / "alpha_report.md",
     ]
 
     for expected in expected_files:
@@ -46,4 +48,6 @@ def test_demo_artifacts_match_dashboard_and_api_contracts(tmp_path):
 
     summary_df = pd.read_parquet(tmp_path / "data" / "backtests" / "backtest_summary.parquet")
     assert {"backtest_name", "cagr", "sharpe", "max_drawdown", "total_return"}.issubset(summary_df.columns)
-    assert {"main", "benchmark_BTC", "benchmark_EW_top100"}.issubset(set(summary_df["backtest_name"]))
+    assert {"main", "benchmark_BTC", "benchmark_ETH", "benchmark_EW_top100"}.issubset(
+        set(summary_df["backtest_name"])
+    )

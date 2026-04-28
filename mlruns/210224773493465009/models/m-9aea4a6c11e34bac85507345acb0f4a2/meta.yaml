@@ -1,0 +1,10 @@
+artifact_location: /Users/priyansh/Desktop/manus chf/chf/mlruns/210224773493465009/models/m-9aea4a6c11e34bac85507345acb0f4a2/artifacts
+creation_timestamp: 1776901809723
+experiment_id: '210224773493465009'
+last_updated_timestamp: 1776901812879
+model_id: m-9aea4a6c11e34bac85507345acb0f4a2
+model_type: null
+name: lightgbm_h7
+source_run_id: 6abff93cc1f44dd08a9642a4940aa26b
+status: 2
+status_message: null

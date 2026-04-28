@@ -51,7 +51,8 @@ chf/
 │   ├── labels/               # Forward-return labels
 │   ├── predictions/          # Model predictions
 │   ├── allocations/          # Portfolio weights
-│   └── backtests/            # Backtest results
+│   ├── backtests/            # Backtest results
+│   └── reports/              # Alpha and research reports
 ├── artifacts/                # MLflow artifacts, models, SHAP
 ├── metadata/                 # SQLite agent run registry
 ├── mlruns/                   # MLflow experiment tracking
@@ -172,6 +173,7 @@ All features are mathematically defined with no look-ahead leakage:
 - **Metrics**: CAGR, Sharpe, Sortino, Calmar, Max Drawdown, Turnover
 - **Sweeps**: Cost sweep, K sweep, subperiod analysis
 - **Benchmarks**: BTC, ETH, equal-weight top-100
+- **Alpha report**: benchmark-relative regression alpha, beta, information ratio, verdict
 
 ---
 

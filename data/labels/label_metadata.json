@@ -1,6 +1,6 @@
 {
-  "snapshot_id": "c96c03638ed5",
-  "run_id": "3fca38d5",
+  "snapshot_id": "f82e537a336f",
+  "run_id": "4a2667be",
   "horizons": [
     7,
     14,
@@ -9,5 +9,5 @@
   "label_type": "log_return",
   "formula": "Y_{t,h} = ln(P_{t+h} / P_t)",
   "leakage_note": "Labels at time t use close price at t+h. Features must use only data up to t. No look-ahead leakage in label construction.",
-  "created_at": "2026-04-18T22:35:50.329203+00:00"
+  "created_at": "2026-04-27T00:42:53.339386+00:00"
 }

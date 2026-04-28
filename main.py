@@ -234,6 +234,10 @@ def generate_demo_artifacts(cfg):
          "sortino": 1.5, "calmar": 2.0, "max_drawdown": -0.20,
          "annualized_vol": 0.35, "total_return": 0.28, "n_days": 90,
          "cost_bps": 0, "backtest_name": "benchmark_BTC"},
+        {"strategy": "benchmark_ETH", "cagr": 0.34, "sharpe": 1.35,
+         "sortino": 1.65, "calmar": 2.2, "max_drawdown": -0.19,
+         "annualized_vol": 0.33, "total_return": 0.31, "n_days": 90,
+         "cost_bps": 0, "backtest_name": "benchmark_ETH"},
         {"strategy": "benchmark_EW_top100", "cagr": 0.25, "sharpe": 1.0,
          "sortino": 1.2, "calmar": 1.8, "max_drawdown": -0.18,
          "annualized_vol": 0.30, "total_return": 0.23, "n_days": 90,
@@ -241,20 +245,32 @@ def generate_demo_artifacts(cfg):
     ])
     bt_summary.to_parquet(bt_dir / "backtest_summary.parquet", index=False)
     eq_rows = []
-    pv = 100_000.0
-    for d in dates[-90:]:
-        daily_return = float(rng.normal(0.001, 0.02))
-        pv *= (1 + daily_return)
-        eq_rows.append({
-            "date_ts": d,
-            "portfolio_value": pv,
-            "daily_return": daily_return,
-            "backtest_name": "main",
-        })
+    return_profiles = {
+        "main": (0.0014, 0.018),
+        "benchmark_BTC": (0.0010, 0.026),
+        "benchmark_ETH": (0.0011, 0.024),
+        "benchmark_EW_top100": (0.0009, 0.022),
+    }
+    for backtest_name, (mu, sigma) in return_profiles.items():
+        pv = 100_000.0
+        for d in dates[-90:]:
+            daily_return = float(rng.normal(mu, sigma))
+            pv *= (1 + daily_return)
+            eq_rows.append({
+                "date_ts": d,
+                "portfolio_value": pv,
+                "daily_return": daily_return,
+                "backtest_name": backtest_name,
+            })
     eq_df = pd.DataFrame(eq_rows)
     eq_df.to_parquet(bt_dir / "equity_curves.parquet", index=False)
     with open(bt_dir / "vbt_stats.json", "w") as f:
         json.dump({"main": {"total_return": 0.42, "sharpe_ratio": 1.8}}, f, indent=2)
+    from reports import evaluate_risk_adjusted_alpha, render_alpha_report_markdown
+    reports_dir = resolve_path(cfg, "reports")
+    alpha_report = evaluate_risk_adjusted_alpha(eq_df, bt_summary)
+    (reports_dir / "alpha_report.json").write_text(json.dumps(alpha_report, indent=2))
+    (reports_dir / "alpha_report.md").write_text(render_alpha_report_markdown(alpha_report))
     print("  [demo] Backtest data written")
 
     print("[demo] Demo data generation complete. Launch dashboard with:")
