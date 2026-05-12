@@ -99,6 +99,42 @@ cp .env.example .env
 # edit locally if needed; never commit real keys
 ```
 
+## How To Run CHF
+
+1. Install dependencies and create a local `.env` file for any provider keys you want to use.
+2. Check API readiness:
+
+```bash
+python3 scripts/probe_api_readiness.py --config configs/run_config.yaml
+```
+
+3. Run the full pipeline:
+
+```bash
+./run_all.sh
+```
+
+4. Or run one stage at a time:
+
+```bash
+python3 main.py universe --config configs/run_config.yaml
+python3 scripts/verify_universe_run.py --config configs/run_config.yaml
+```
+
+Replace `universe` with `market`, `onchain`, `features`, `labels`, `model`, `portfolio`, or `backtest` and run the matching verifier.
+
+5. Launch the dashboard after local data has been generated:
+
+```bash
+streamlit run app/dashboard.py
+```
+
+Beginner guides:
+
+- [User Guide](docs/USER_GUIDE.md)
+- [API Keys And Data Sources](docs/API_KEYS_AND_DATA_SOURCES.md)
+- [Dashboard Guide](docs/DASHBOARD_GUIDE.md)
+
 Run syntax validation:
 
 ```bash

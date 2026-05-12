@@ -773,3 +773,34 @@ Phase 9 redo status:
 Manual note:
 
 - The README includes the requested `.env.example` setup command. Final repository review should confirm `.env.example` exists or adjust setup wording before committing README polish.
+
+## Beginner Setup Documentation Update (May 12, 2026)
+
+The practical setup/runbook was added to repository documentation for non-technical reviewers.
+
+Files added:
+
+- `docs/USER_GUIDE.md`
+- `docs/API_KEYS_AND_DATA_SOURCES.md`
+- `docs/DASHBOARD_GUIDE.md`
+
+README update:
+
+- Added a concise `How To Run CHF` section.
+- Linked the new beginner guides.
+- Kept the final research conclusion unchanged: no verified alpha found under tested configurations.
+
+Guide coverage:
+
+- installation and virtual environment setup,
+- local `.env` usage,
+- API key meanings and required/optional status,
+- API readiness checks,
+- full pipeline command,
+- individual stage commands and verifiers,
+- AlphaResearchAgent signal-only command,
+- dashboard launch steps,
+- expected generated output locations,
+- troubleshooting and verifier-first failure handling.
+
+No source code, research numbers, generated data, `.env` values, commits, or pushes were changed.
