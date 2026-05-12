@@ -762,6 +762,14 @@ Phase 9 validation passed:
 - Syntax validation.
 - Targeted tests: `54 passed`.
 
+Phase 9 redo status:
+
+- README rewrite is present in the local working tree.
+- README says `No verified alpha found under tested configurations.`
+- README preserves `alpha_verified=false` for every tested candidate.
+- README identifies `linear_ridge / market_only / raw_forward_return / 30d` as the strongest candidate and says it did not beat BTC or BTC/ETH 50-50.
+- No commit, push, source-logic edit, data deletion, `.env` edit, or full pipeline rerun was performed.
+
 Manual note:
 
 - The README includes the requested `.env.example` setup command. Final repository review should confirm `.env.example` exists or adjust setup wording before committing README polish.

@@ -13,7 +13,7 @@ Can market and on-chain features be used to construct crypto portfolios that out
 - Signal search found statistically promising candidates.
 - BacktestAgent tested candidate portfolios after transaction costs and benchmark sanity checks.
 - `alpha_verified=false` for all tested candidates.
-- No alpha was verified under tested configurations.
+- No verified alpha found under tested configurations.
 - Strongest candidate: `linear_ridge / market_only / raw_forward_return / 30d`.
 - That candidate beat ETH and the equal-weight universe, but did not beat BTC or BTC/ETH 50-50.
 - The latest-survivor universe limitation remains because CMC 3-year historical listings were blocked by current API plan access.
@@ -163,7 +163,7 @@ See [docs/REPRODUCIBILITY_COMMANDS.md](docs/REPRODUCIBILITY_COMMANDS.md) for com
 - CoinMarketCap 3-year historical listings access was blocked by the current API plan.
 - On-chain coverage is sparse relative to market coverage.
 - There is no real-time execution engine.
-- No alpha was verified under tested configurations.
+- No verified alpha found under tested configurations.
 - Research and education only; not financial advice.
 
 ## License

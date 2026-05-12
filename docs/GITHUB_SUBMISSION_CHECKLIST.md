@@ -79,6 +79,13 @@ python3 -m pytest tests/test_alpha_research_agent.py tests/test_model_agent_rese
 - Syntax validation: PASS.
 - Targeted tests: PASS, `54 passed`.
 
+## Phase 9 Redo Status
+
+- README rewrite verified in the local working tree.
+- README contains the required no-alpha conclusion: `No verified alpha found under tested configurations.`
+- README contains `alpha_verified=false` and the strongest candidate line for `linear_ridge / market_only / raw_forward_return / 30d`.
+- No commit, push, broad staging command, source-logic edit, data deletion, or pipeline rerun was performed.
+
 ## Remaining Manual Actions
 
 - Review README rendering on GitHub.

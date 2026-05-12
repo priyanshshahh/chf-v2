@@ -193,6 +193,12 @@ Phase 9 validation:
 - Syntax validation: PASS.
 - Targeted tests: PASS, `54 passed`.
 
+Phase 9 redo:
+
+- README polish was applied directly to the local working tree.
+- The README now uses the exact final conclusion wording requested for submission: `No verified alpha found under tested configurations.`
+- No source logic, generated outputs, `.env` values, commits, pushes, or pipeline stages were changed.
+
 Manual note:
 
 - The README includes the requested `cp .env.example .env` quick-start command. If `.env.example` is not present in the repository at final review time, add one in a separate setup-docs pass or adjust the command before committing.
