@@ -165,3 +165,34 @@ The repository is ready for a careful explicit-path commit later, subject to man
 Final research conclusion remains unchanged:
 
 No verified alpha found under tested configurations.
+
+## Phase 9 README And GitHub Submission Polish
+
+Phase 9 rewrote the README as a GitHub-facing research landing page. No agents, providers, models, features, configs, tests, generated outputs, `.env` values, or research result numbers were changed.
+
+README status:
+
+- Project is described as a reproducible crypto alpha research pipeline.
+- The current result is stated near the top: `alpha_verified=false` for all tested candidates.
+- The README explicitly says no verified alpha was found under tested configurations.
+- Candidate and benchmark tables preserve the final BacktestAgent numbers.
+- The latest-survivor universe limitation and CMC historical listings access limitation are disclosed.
+- Generated `data/` artifacts are described as local-only and ignored by Git.
+- The README links to the final report package under `docs/`.
+
+Submission checklist:
+
+- `docs/GITHUB_SUBMISSION_CHECKLIST.md`
+
+Phase 9 validation:
+
+- README overclaim scan: PASS.
+- README docs link check: PASS.
+- Secret scan against `HEAD`: PASS.
+- Working-tree README/docs secret scan: PASS.
+- Syntax validation: PASS.
+- Targeted tests: PASS, `54 passed`.
+
+Manual note:
+
+- The README includes the requested `cp .env.example .env` quick-start command. If `.env.example` is not present in the repository at final review time, add one in a separate setup-docs pass or adjust the command before committing.

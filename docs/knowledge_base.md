@@ -732,3 +732,36 @@ Commit preparation guidance:
 - Do not use `git add .`.
 - Review diffs manually, then stage explicit source/docs/tests/config paths only.
 - Generated research data and local cache artifacts should remain out of Git.
+
+## Phase 9 GitHub README Rewrite And Submission Polish (May 12, 2026)
+
+Phase 9 rewrote the GitHub README as a concise research-oriented landing page. No agents, providers, models, features, configs, tests, generated outputs, `.env` values, local data, or research result numbers were changed.
+
+README now emphasizes:
+
+- CHF is a reproducible quantitative crypto alpha research pipeline.
+- The research question is whether market and on-chain features can outperform BTC, ETH, BTC/ETH 50-50, and equal-weight universe benchmarks after costs and realistic validation.
+- `alpha_verified=false` for every tested candidate.
+- No verified alpha found under tested configurations.
+- The strongest candidate was `linear_ridge / market_only / raw_forward_return / 30d`, which beat ETH and equal-weight universe but did not beat BTC or BTC/ETH 50-50.
+- BacktestAgent is the final alpha authority.
+- AlphaResearchAgent is signal-only and cannot claim alpha.
+- `data/` outputs are generated locally and ignored by Git.
+- Latest-survivor and CMC historical listings access limitations remain.
+
+Submission checklist created:
+
+- `docs/GITHUB_SUBMISSION_CHECKLIST.md`
+
+Phase 9 validation passed:
+
+- README overclaim scan.
+- README docs link check.
+- Secret scan against `HEAD`.
+- Working-tree README/docs secret scan.
+- Syntax validation.
+- Targeted tests: `54 passed`.
+
+Manual note:
+
+- The README includes the requested `.env.example` setup command. Final repository review should confirm `.env.example` exists or adjust setup wording before committing README polish.

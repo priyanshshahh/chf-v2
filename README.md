@@ -1,249 +1,173 @@
-# CHF — Crypto Hedge Fund Portfolio System
+# Project CHF — Crypto Alpha Research Pipeline
 
-A production-grade, config-driven, agent-based crypto portfolio management system with ML/AI signal generation, vectorized backtesting, and a Streamlit analytics dashboard.
+Project CHF is a reproducible quantitative crypto research pipeline that tests whether market and on-chain features contain tradable cross-sectional alpha after leakage-safe modeling, deterministic portfolio construction, transaction costs, benchmark sanity checks, and out-of-sample backtesting.
 
-Start here: `docs/knowledge_base.md` (how the system works, where artifacts live, and where to make changes safely).
+Start with the final research package in [docs/RESEARCH_RESULTS_SUMMARY.md](docs/RESEARCH_RESULTS_SUMMARY.md), then use [docs/REPRODUCIBILITY_COMMANDS.md](docs/REPRODUCIBILITY_COMMANDS.md) for reproduction notes.
 
----
+## Research Question
 
-## Architecture Overview
+Can market and on-chain features be used to construct crypto portfolios that outperform BTC, ETH, BTC/ETH 50-50, and an equal-weight crypto universe after costs and realistic validation?
 
-```
-chf/
-├── agents/                   # Agent layer (each agent: prepare → run → persist)
-│   ├── base.py               # AgentBase with retry, SQLite registry, snapshots
-│   ├── universe_agent.py     # CoinGecko universe construction
-│   ├── market_data_agent.py  # CCXT/Binance OHLCV ingestion
-│   ├── onchain_agent.py      # CoinMetrics + DeFiLlama on-chain data
-│   ├── feature_agent.py      # FeatureAgentV1 (market) + V2 (on-chain)
-│   ├── label_agent.py        # Forward-return label generation
-│   ├── model_agent.py        # Walk-forward ML training + MLflow
-│   ├── portfolio_agent.py    # Portfolio allocation strategies
-│   └── backtest_agent.py     # Vectorized backtesting engine
-├── configs/
-│   ├── run_config.yaml       # Master configuration (all parameters)
-│   ├── config.py             # Config loader with env overrides
-│   └── logging_config.py     # Structured JSON logging
-├── features/
-│   └── feature_engineering.py  # All feature math with explicit formulas
-├── models/
-│   └── walk_forward.py       # Purged/embargoed walk-forward CV
-├── pipelines/
-│   ├── pipeline_runner.py    # Full pipeline orchestrator + CLI
-│   ├── data_cleaner.py       # OHLCV and on-chain data cleaning
-│   └── duckdb_engine.py      # DuckDB analytics engine
-├── providers/
-│   ├── coingecko.py          # CoinGecko REST API provider
-│   ├── ccxt_binance.py       # CCXT/Binance OHLCV provider
-│   ├── coinmetrics.py        # CoinMetrics Community API provider
-│   └── defillama.py          # DeFiLlama TVL provider
-├── app/
-│   ├── dashboard.py          # Streamlit dashboard (6 views)
-│   └── api.py                # FastAPI REST endpoints
-├── jobs/
-│   └── scheduler.py          # APScheduler cron jobs
-├── schemas/
-│   └── schemas.py            # Pydantic data models
-├── tests/
-│   └── smoke_test.py         # End-to-end smoke test
-├── data/                     # Pipeline outputs (auto-created)
-│   ├── raw/                  # Raw ingested data
-│   ├── cleaned/              # Cleaned/staged data
-│   ├── features/             # Feature store (Parquet)
-│   ├── labels/               # Forward-return labels
-│   ├── predictions/          # Model predictions
-│   ├── allocations/          # Portfolio weights
-│   ├── backtests/            # Backtest results
-│   └── reports/              # Alpha and research reports
-├── artifacts/                # MLflow artifacts, models, SHAP
-├── metadata/                 # SQLite agent run registry
-├── mlruns/                   # MLflow experiment tracking
-├── requirements.txt
-├── pyproject.toml
-└── run_dashboard.sh          # One-click dashboard launcher
+## Current Research Result
+
+- Signal search found statistically promising candidates.
+- BacktestAgent tested candidate portfolios after transaction costs and benchmark sanity checks.
+- `alpha_verified=false` for all tested candidates.
+- No alpha was verified under tested configurations.
+- Strongest candidate: `linear_ridge / market_only / raw_forward_return / 30d`.
+- That candidate beat ETH and the equal-weight universe, but did not beat BTC or BTC/ETH 50-50.
+- The latest-survivor universe limitation remains because CMC 3-year historical listings were blocked by current API plan access.
+
+| Candidate | Best Strategy | Return | CAGR | Sharpe | Max DD | Alpha Verified |
+|---|---|---:|---:|---:|---:|---:|
+| lightgbm / market_only / raw_forward_return / 14d | top_20_vol_scaled | 45.39% | 12.10% | 0.5030 | -71.45% | false |
+| linear_ridge / market_only / raw_forward_return / 30d | top_5_equal_weight | 147.36% | 31.84% | 0.7521 | -59.40% | false |
+| random_forest / market_only / raw_forward_return / 14d | top_5_equal_weight | -30.40% | -10.47% | 0.2288 | -86.86% | false |
+
+| Benchmark | Total Return |
+|---|---:|
+| BTC | 305.50% |
+| ETH | 69.85% |
+| BTC/ETH 50-50 | 178.04% |
+| Equal-weight universe | 30.39% |
+
+## Pipeline Architecture
+
+```text
+UniverseAgent
+→ MarketDataAgent
+→ OnChainAgent
+→ FeatureAgent
+→ LabelAgent
+→ ModelAgent
+→ AlphaResearchAgent
+→ PortfolioAgent
+→ BacktestAgent
 ```
 
----
+- UniverseAgent: builds the eligible crypto universe.
+- MarketDataAgent: ingests and validates OHLCV data.
+- OnChainAgent: ingests CoinMetrics, DeFiLlama, and other provider metrics where available.
+- FeatureAgent: builds leakage-safe market/on-chain features.
+- LabelAgent: creates exact forward calendar labels.
+- ModelAgent: performs purged walk-forward signal screening.
+- AlphaResearchAgent: signal-only research expansion; cannot claim alpha.
+- PortfolioAgent: creates deterministic allocations from prediction-only files.
+- BacktestAgent: final alpha authority; verifies or rejects alpha after costs and benchmarks.
+
+## Methodology Highlights
+
+- Exact forward calendar labels.
+- Leakage guards throughout feature, label, model, portfolio, and backtest stages.
+- Purged and embargoed walk-forward validation.
+- Cross-sectional rank metrics, including Rank IC and top/bottom spreads.
+- Prediction-only portfolio inputs; realized returns and labels are rejected from allocation inputs.
+- Transaction costs included in backtests.
+- BTC, ETH, BTC/ETH 50-50, and equal-weight universe benchmarks.
+- Benchmark sanity checks for date alignment and impossible benchmark behavior.
+- No alpha claim unless BacktestAgent verifies it.
+
+## Repository Layout
+
+```text
+agents/       deterministic pipeline agents
+providers/    API/provider adapters
+features/     feature engineering utilities
+models/       walk-forward validation utilities
+pipelines/    orchestration helpers
+scripts/      readiness probes, verifiers, candidate export
+configs/      run configuration and exclusions
+tests/        unit/research-integrity tests and fixtures
+docs/         final reports and reproducibility notes
+schemas/      schema definitions
+data/         generated locally; ignored by Git
+metadata/     local runtime metadata; ignored by Git
+```
 
 ## Quick Start
 
-### 1. Install Dependencies
-
 ```bash
-cd /path/to/chf
+git clone https://github.com/priyanshshahh/chf.git
+cd chf
 
-# Option A (recommended): use the Makefile + a local venv
-make setup
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Option B: install into your current Python environment
-# pip3 install -r requirements.txt
-```
+python3 -m pip install -r requirements.txt
 
-### 2. Configure API Keys (Optional)
-
-```bash
 cp .env.example .env
-# Edit .env locally if a provider requires a key.
-# Keep real API keys out of git, docs, screenshots, and logs.
+# edit locally if needed; never commit real keys
 ```
 
-### 3. Run the Smoke Test (Synthetic Data)
+Run syntax validation:
 
 ```bash
-python3 tests/smoke_test.py
+python3 -m py_compile main.py agents/*.py providers/*.py features/*.py models/*.py pipelines/*.py scripts/*.py
 ```
 
-### 4. Launch the Dashboard
+Run targeted research-integrity tests:
 
 ```bash
-./run_dashboard.sh
-# or:
-streamlit run app/dashboard.py
+python3 -m pytest \
+  tests/test_alpha_research_agent.py \
+  tests/test_model_agent_research_mode.py \
+  tests/test_portfolio_agent_research_mode.py \
+  tests/test_backtest_agent_research_mode.py \
+  tests/test_universe_agent_research_mode.py \
+  tests/test_market_data_agent_research_mode.py \
+  tests/test_onchain_agent_research_mode.py \
+  tests/test_feature_agent_research_mode.py \
+  tests/test_label_agent_research_mode.py \
+  -q
 ```
 
-Open: **http://localhost:8501**
-
-### 5. Run the Full Pipeline
+Probe API readiness:
 
 ```bash
-# Full pipeline (requires API keys for live data)
-python3 pipelines/pipeline_runner.py --full
-
-# Individual stages
-python3 pipelines/pipeline_runner.py --stage universe
-python3 pipelines/pipeline_runner.py --stage market_data
-python3 pipelines/pipeline_runner.py --stage features
-python3 pipelines/pipeline_runner.py --stage models
-python3 pipelines/pipeline_runner.py --stage backtest
+python3 scripts/probe_api_readiness.py --config configs/run_config.yaml
 ```
 
----
-
-## Dashboard Views
-
-| View | Description |
-|------|-------------|
-| 🌐 Universe Explorer | Market cap, volume, category filters for all tracked assets |
-| 📡 Signal Monitor | Latest model signals, Rank IC over time, feature heatmaps |
-| ⚖️ Portfolio Weights | Current allocations, weight history, transaction log |
-| 📊 Backtest Analytics | Equity curves, drawdowns, cost sweeps, K sweeps |
-| 🤖 Model Diagnostics | Feature importance, walk-forward IC, fold metrics |
-| ⚙️ Pipeline Control | Manual triggers, run history, config viewer |
-
----
-
-## Feature Engineering
-
-All features are mathematically defined with no look-ahead leakage:
-
-| Feature | Formula | Family |
-|---------|---------|--------|
-| `ret_{n}d` | `ln(P_t / P_{t-n})` | Market |
-| `vol_30d` | `std(daily_ret, 30) × √365` | Market |
-| `skew_30d` | `skewness(daily_ret, 30)` | Market |
-| `beta_btc_60d` | `Cov(R_i, R_BTC) / Var(R_BTC)` | Market |
-| `vol_ratio_30d` | `MA(Volume, 30) / mean(Volume)` | Market |
-| `reversal_3_30` | `ret_3d - ret_30d` | Market |
-| `nvt_ratio` | `Market_Cap / TxTfrValAdjUSD` | On-Chain |
-| `mvrv_proxy` | `Market_Cap / CapRealUSD` | On-Chain |
-| `adr_growth_30d` | `ln(AdrActCnt_t / AdrActCnt_{t-30})` | On-Chain |
-| `tvl_ratio` | `TVL_USD / Market_Cap` | On-Chain |
-
----
-
-## ML Pipeline
-
-- **Models**: RandomForest (baseline), LightGBM (advanced)
-- **Validation**: Purged + embargoed expanding walk-forward CV
-- **Metrics**: Rank IC, Hit Rate, R², IC t-stat
-- **Tracking**: Local MLflow experiment tracking (`mlruns/`)
-- **Explainability**: SHAP values for tree-based models
-
----
-
-## Portfolio Strategies
-
-| Strategy | Description |
-|----------|-------------|
-| `top_k_equal_weight` | Top-K assets by signal, equal weights |
-| `score_proportional` | Weights proportional to predicted return |
-
-**Constraints**: Long-only, max weight 10%, positive signal filter, weekly rebalancing.
-
----
-
-## Backtest Engine
-
-- **Vectorized**: NumPy/Pandas-based, no loops over dates
-- **Transaction costs**: Configurable BPS (default: 20bps)
-- **Metrics**: CAGR, Sharpe, Sortino, Calmar, Max Drawdown, Turnover
-- **Sweeps**: Cost sweep, K sweep, subperiod analysis
-- **Benchmarks**: BTC, ETH, equal-weight top-100
-- **Alpha report**: benchmark-relative regression alpha, beta, information ratio, verdict
-
----
-
-## Configuration
-
-All parameters in `configs/run_config.yaml`. Key sections:
-
-```yaml
-universe:
-  top_n: 100
-  min_daily_volume_usd: 1_000_000
-
-features:
-  return_windows: [3, 7, 14, 30, 90]
-  volatility_window: 30
-  beta_window: 60
-
-modeling:
-  models: [random_forest, lightgbm]
-  walk_forward:
-    initial_train_months: 12
-    step_months: 1
-    embargo_days: 7
-
-portfolio:
-  strategies: [top_k_equal_weight, score_proportional]
-  default_top_k: 10
-  max_weight: 0.10
-
-backtesting:
-  initial_capital: 100_000
-  transaction_cost_bps: 20
-```
-
----
-
-## Scheduler (APScheduler)
+Audit local pipeline inputs:
 
 ```bash
-python3 jobs/scheduler.py
+python3 scripts/audit_pipeline_inputs.py --config configs/run_config.yaml
 ```
 
-Default schedule:
-- Universe update: 1st of month, 02:00 UTC
-- Market data: daily, 06:00 UTC
-- On-chain data: daily, 07:00 UTC
-- Features: daily, 08:00 UTC
-- Models: 1st of month, 10:00 UTC
-- Portfolio: every Monday, 12:00 UTC
-- Backtest: 1st of month, 14:00 UTC
+See [docs/REPRODUCIBILITY_COMMANDS.md](docs/REPRODUCIBILITY_COMMANDS.md) for complete reproduction notes.
 
----
+## Data And API Notes
 
-## Data Sources
+- Generated artifacts are not committed.
+- `data/` is ignored by Git.
+- Local runs create Parquet, JSON, and Markdown outputs under `data/`.
+- CoinMetrics Community and DeFiLlama may work without keys.
+- CoinMarketCap historical listings for a 3-year point-in-time universe were blocked by current plan access during this study.
+- `.env` must never be committed.
+- The repository should use `.env.example` for non-secret local setup guidance only.
 
-| Source | Data | API |
-|--------|------|-----|
-| CoinGecko | Universe, prices, market cap | Free + Pro |
-| CCXT/Binance | OHLCV, order book | Free |
-| CoinMetrics Community | NVT, MVRV, active addresses | Free |
-| DeFiLlama | TVL, protocol metrics | Free |
+## Final Reports
 
----
+- [Research Results Summary](docs/RESEARCH_RESULTS_SUMMARY.md)
+- [Alpha Findings Report](docs/ALPHA_FINDINGS_REPORT.md)
+- [Alpha Backtest Verification Report](docs/ALPHA_BACKTEST_VERIFICATION_REPORT.md)
+- [Alpha Signal Search Report](docs/ALPHA_SIGNAL_SEARCH_REPORT.md)
+- [Limitations And Next Steps](docs/LIMITATIONS_AND_NEXT_STEPS.md)
+- [Reproducibility Commands](docs/REPRODUCIBILITY_COMMANDS.md)
+- [API Data Readiness Audit](docs/API_DATA_READINESS_AUDIT.md)
+- [CMC Historical Access Limitation](docs/CMC_HISTORICAL_ACCESS_LIMITATION.md)
+- [Pipeline Run Report](docs/PIPELINE_RUN_REPORT.md)
+
+## Limitations
+
+- The current production universe is a latest-survivor baseline, not a full point-in-time historical universe.
+- CoinMarketCap 3-year historical listings access was blocked by the current API plan.
+- On-chain coverage is sparse relative to market coverage.
+- There is no real-time execution engine.
+- No alpha was verified under tested configurations.
+- Research and education only; not financial advice.
 
 ## License
 
-MIT License. For research and educational purposes.
+MIT License.
+
+For research and educational purposes only. Not financial advice.
