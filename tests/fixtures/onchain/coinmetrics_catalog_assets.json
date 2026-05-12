@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "asset": "btc",
+      "name": "Bitcoin",
+      "community": true
+    },
+    {
+      "asset": "eth",
+      "name": "Ethereum",
+      "community": true
+    }
+  ]
+}

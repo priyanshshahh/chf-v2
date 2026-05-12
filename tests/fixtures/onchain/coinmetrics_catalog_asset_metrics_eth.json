@@ -1,0 +1,76 @@
+{
+  "data": [
+    {
+      "asset": "eth",
+      "metric": "AdrActCnt",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "TxCnt",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "CapRealUSD",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "CapMVRVCur",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "NVTAdj",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "FeeTotUSD",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "TxTfrValAdjUSD",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "eth",
+      "metric": "SplyCur",
+      "min_time": "2016-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    }
+  ]
+}

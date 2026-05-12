@@ -2,6 +2,8 @@
 
 A production-grade, config-driven, agent-based crypto portfolio management system with ML/AI signal generation, vectorized backtesting, and a Streamlit analytics dashboard.
 
+Start here: `docs/knowledge_base.md` (how the system works, where artifacts live, and where to make changes safely).
+
 ---
 
 ## Architecture Overview
@@ -68,17 +70,21 @@ chf/
 ### 1. Install Dependencies
 
 ```bash
-cd ~/Desktop/manus\ chf/chf
-pip3 install -r requirements.txt
+cd /path/to/chf
+
+# Option A (recommended): use the Makefile + a local venv
+make setup
+
+# Option B: install into your current Python environment
+# pip3 install -r requirements.txt
 ```
 
 ### 2. Configure API Keys (Optional)
 
 ```bash
 cp .env.example .env
-# Edit .env to add your API keys:
-# COINGECKO_API_KEY=your_key
-# COINMETRICS_API_KEY=your_key
+# Edit .env locally if a provider requires a key.
+# Keep real API keys out of git, docs, screenshots, and logs.
 ```
 
 ### 3. Run the Smoke Test (Synthetic Data)

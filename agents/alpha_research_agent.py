@@ -329,9 +329,8 @@ class AlphaResearchAgent(AgentBase):
     def _select_experiments(self, experiments: List[Dict[str, Any]], max_experiments: int) -> List[Dict[str, Any]]:
         if max_experiments >= len(experiments):
             return experiments
-        # A bounded research pass should cover the grid, not simply grind through
-        # the first feature/label corner. Rank by model family first so rule,
-        # baseline, and ML experiments all get represented deterministically.
+        # A bounded research pass should cover model families, not spend the
+        # whole budget on the first model's feature/label grid.
         model_order = {
             "baseline_cross_sectional_mean": 0,
             "rule_momentum_14d": 1,
@@ -347,17 +346,38 @@ class AlphaResearchAgent(AgentBase):
         feature_order = {name: i for i, name in enumerate(self._cfg.get("feature_sets", []))}
         label_order = {name: i for i, name in enumerate(self._cfg.get("label_targets", []))}
         horizon_order = {int(h): i for i, h in enumerate(self._cfg.get("horizons", []))}
-        ordered = sorted(
-            experiments,
-            key=lambda e: (
-                model_order.get(e["model_name"], 99),
-                feature_order.get(e["feature_set"], 99),
-                label_order.get(e["label_target"], 99),
-                horizon_order.get(int(e["horizon_days"]), 99),
-                e["experiment_id"],
-            ),
-        )
-        return ordered[:max_experiments]
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for exp in experiments:
+            grouped.setdefault(str(exp["model_name"]), []).append(exp)
+        for model, rows in grouped.items():
+            grouped[model] = sorted(
+                rows,
+                key=lambda e: (
+                    feature_order.get(e["feature_set"], 99)
+                    + label_order.get(e["label_target"], 99)
+                    + horizon_order.get(int(e["horizon_days"]), 99),
+                    feature_order.get(e["feature_set"], 99),
+                    label_order.get(e["label_target"], 99),
+                    horizon_order.get(int(e["horizon_days"]), 99),
+                    e["experiment_id"],
+                ),
+            )
+        model_names = sorted(grouped, key=lambda name: (model_order.get(name, 99), name))
+        selected: List[Dict[str, Any]] = []
+        offset = 0
+        while len(selected) < max_experiments:
+            added = False
+            for model in model_names:
+                rows = grouped[model]
+                if offset < len(rows):
+                    selected.append(rows[offset])
+                    added = True
+                    if len(selected) >= max_experiments:
+                        break
+            if not added:
+                break
+            offset += 1
+        return selected
 
     def _target_col(self, target: str, horizon: int) -> str:
         if target == "raw_forward_return":
@@ -628,7 +648,10 @@ class AlphaResearchAgent(AgentBase):
     def _compatible_model_outputs(self, pred: pd.DataFrame, lb: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         if pred.empty or lb.empty:
             return pd.DataFrame(), pd.DataFrame()
-        selected = lb.sort_values(["alpha_signal_status", "final_research_score"], ascending=[False, False]).iloc[0]
+        candidates = lb[lb.get("candidate_for_backtest", False) == True].copy()
+        if candidates.empty:
+            return pd.DataFrame(), pd.DataFrame()
+        selected = candidates.sort_values(["signal_gate_passed", "final_research_score"], ascending=[False, False]).iloc[0]
         combo = pred[pred["experiment_id"] == selected["experiment_id"]].copy()
         combo["prediction_rank"] = combo.groupby("date_ts")["prediction"].rank(method="first", ascending=False)
         combo["prediction_rank_pct"] = combo.groupby("date_ts")["prediction"].rank(method="average", pct=True)
@@ -678,6 +701,7 @@ class AlphaResearchAgent(AgentBase):
             ],
             "canonical_outputs_mutated": False,
             "export_candidate_to_predictions": bool(self._cfg.get("export_candidate_to_predictions", False)),
+            "signal_only": bool(self._cfg.get("signal_only", True)),
         }
 
     def _build_report(self, lb: pd.DataFrame, best: pd.DataFrame) -> str:
@@ -696,7 +720,7 @@ class AlphaResearchAgent(AgentBase):
         result["predictions"].to_parquet(self._pred_dir / "alpha_research_predictions.parquet", index=False)
         result["fold_metrics"].to_parquet(self._pred_dir / "alpha_fold_metrics.parquet", index=False)
         result["leaderboard"].to_parquet(self._pred_dir / "alpha_model_leaderboard.parquet", index=False)
-        result["feature_importance"].to_parquet(self._pred_dir / "feature_importance.parquet", index=False)
+        result["feature_importance"].to_parquet(self._pred_dir / "alpha_feature_importance.parquet", index=False)
         (self._pred_dir / "data_quality_alpha_research.md").write_text(result["report_md"])
         if self._cfg.get("export_candidate_to_predictions", False) and not result["compatible_predictions"].empty:
             result["compatible_predictions"].to_parquet(self._pred_dir / "model_predictions.parquet", index=False)
@@ -714,6 +738,7 @@ class AlphaResearchAgent(AgentBase):
             "research_leaderboard": str(out / "research_leaderboard.parquet"),
             "alpha_research_predictions": str(self._pred_dir / "alpha_research_predictions.parquet"),
             "alpha_model_leaderboard": str(self._pred_dir / "alpha_model_leaderboard.parquet"),
+            "alpha_feature_importance": str(self._pred_dir / "alpha_feature_importance.parquet"),
         }
 
     def _validate_before_persist(self, result: Dict[str, Any]) -> None:

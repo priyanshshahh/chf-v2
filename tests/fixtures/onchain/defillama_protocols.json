@@ -1,0 +1,14 @@
+[
+  {
+    "slug": "uniswap",
+    "name": "Uniswap",
+    "symbol": "UNI",
+    "gecko_id": "uniswap"
+  },
+  {
+    "slug": "aave",
+    "name": "Aave",
+    "symbol": "AAVE",
+    "gecko_id": "aave"
+  }
+]

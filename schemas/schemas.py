@@ -16,20 +16,33 @@ from pydantic import BaseModel, Field, field_validator
 
 class AssetMetadata(BaseModel):
     """Metadata for a single crypto asset."""
+    snapshot_date: datetime
+    provider: str
+    provider_asset_id: str
+    coin_id: str
     symbol: str
-    coingecko_id: str
     name: str
-    rank: int
+    market_cap_rank: int
     market_cap_usd: float
     volume_24h_usd: float
+    price_usd: float
     is_stablecoin: bool = False
     is_wrapped: bool = False
-    is_excluded: bool = False
-    exclusion_reason: Optional[str] = None
-    categories: List[str] = Field(default_factory=list)
-    retrieved_at: datetime
+    is_bridged: bool = False
+    is_lst: bool = False
+    is_synthetic_pegged: bool = False
+    is_mature_365d: bool = False
+    is_exchange_tradable: bool = False
+    exchange: str = ""
+    exchange_symbol: str = ""
+    has_onchain_coverage: bool = False
+    onchain_coverage_source: str = ""
+    is_eligible: bool = False
+    exclusion_reason: str = ""
+    raw_category_tags: List[str] = Field(default_factory=list)
     snapshot_id: str
-    source: str = "coingecko"
+    source: str
+    created_at_utc: datetime
 
 
 class UniverseSnapshot(BaseModel):
@@ -48,6 +61,8 @@ class UniverseSnapshot(BaseModel):
 
 class OHLCVBar(BaseModel):
     """A single OHLCV bar."""
+    exchange: str
+    exchange_symbol: str
     symbol: str
     date_ts: datetime
     open: float
@@ -55,9 +70,11 @@ class OHLCVBar(BaseModel):
     low: float
     close: float
     volume: float
-    source: str = "binance"
-    retrieved_at: datetime
+    source: str
+    fetched_at_utc: datetime
     snapshot_id: str
+    is_forward_filled: bool = False
+    is_incomplete_dropped: bool = False
 
 
 class MarketDataQA(BaseModel):

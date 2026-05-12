@@ -37,34 +37,45 @@ fi
 
 echo "[1/8] Running UniverseAgent..."
 python3 main.py universe
+python3 scripts/verify_universe_run.py
 echo ""
 
 echo "[2/8] Running MarketDataAgent..."
 python3 main.py market
+python3 scripts/verify_market_run.py
 echo ""
 
 echo "[3/8] Running OnChainAgent..."
+python3 scripts/verify_market_run.py
 python3 main.py onchain
+python3 scripts/verify_onchain_run.py
 echo ""
 
 echo "[4/8] Running FeatureAgent..."
 python3 main.py features
+python3 scripts/verify_feature_run.py
 echo ""
 
 echo "[5/8] Running LabelAgent..."
+python3 scripts/verify_feature_run.py
 python3 main.py labels
+python3 scripts/verify_label_run.py
 echo ""
 
 echo "[6/8] Running ModelAgent..."
-python3 main.py models
+python3 scripts/verify_label_run.py
+python3 main.py model
+python3 scripts/verify_model_run.py
 echo ""
 
 echo "[7/8] Running PortfolioAgent..."
 python3 main.py portfolio
+python3 scripts/verify_portfolio_run.py
 echo ""
 
 echo "[8/8] Running BacktestAgent..."
 python3 main.py backtest
+python3 scripts/verify_backtest_run.py
 echo ""
 
 echo "========================================"

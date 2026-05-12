@@ -1,0 +1,76 @@
+{
+  "data": [
+    {
+      "asset": "btc",
+      "metric": "AdrActCnt",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "TxCnt",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "CapRealUSD",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "CapMVRVCur",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "NVTAdj",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "FeeTotUSD",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "TxTfrValAdjUSD",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    },
+    {
+      "asset": "btc",
+      "metric": "SplyCur",
+      "min_time": "2011-01-01T00:00:00Z",
+      "max_time": "2026-04-27T00:00:00Z",
+      "frequencies": [
+        "1d"
+      ]
+    }
+  ]
+}

@@ -43,25 +43,91 @@ class PipelineRunner:
         """Run UniverseAgent."""
         from agents.universe_agent import UniverseAgent
         agent = UniverseAgent(self.cfg, snapshot_date=snapshot_date)
-        success = agent.execute()
+        success = agent.execute(max_retries=1)
         self._results["universe"] = success
         return success
 
+    def validate_universe_outputs(self) -> bool:
+        """Validate research universe artifacts before downstream stages."""
+        try:
+            if not self.cfg.get("universe", {}).get("research_mode", False):
+                return True
+            from scripts.verify_universe_run import validate_universe_outputs
+
+            failures = validate_universe_outputs(self.cfg)
+            if failures:
+                for failure in failures:
+                    logger.error(f"Universe validation failed: {failure}")
+                self._results["universe_validation"] = False
+                return False
+            self._results["universe_validation"] = True
+            return True
+        except Exception as exc:
+            logger.error(f"Universe validation crashed: {exc}")
+            self._results["universe_validation"] = False
+            return False
+
     def run_market_data(self, symbols: Optional[List[str]] = None) -> bool:
         """Run MarketDataAgent."""
+        if not self.validate_universe_outputs():
+            self._results["market_data"] = False
+            return False
         from agents.market_data_agent import MarketDataAgent
         agent = MarketDataAgent(self.cfg, symbols=symbols)
-        success = agent.execute()
+        success = agent.execute(max_retries=1)
+        if success and not self.validate_market_outputs():
+            success = False
         self._results["market_data"] = success
         return success
 
+    def validate_market_outputs(self) -> bool:
+        """Validate canonical market outputs before downstream stages."""
+        try:
+            from scripts.verify_market_run import validate_market_outputs
+
+            failures = validate_market_outputs(self.cfg)
+            if failures:
+                for failure in failures:
+                    logger.error(f"Market validation failed: {failure}")
+                self._results["market_validation"] = False
+                return False
+            self._results["market_validation"] = True
+            return True
+        except Exception as exc:
+            logger.error(f"Market validation crashed: {exc}")
+            self._results["market_validation"] = False
+            return False
+
     def run_onchain(self) -> bool:
         """Run OnChainAgent."""
+        if not self.validate_market_outputs():
+            self._results["onchain"] = False
+            return False
         from agents.onchain_agent import OnChainAgent
         agent = OnChainAgent(self.cfg)
-        success = agent.execute()
+        success = agent.execute(max_retries=1)
+        if success and not self.validate_onchain_outputs():
+            success = False
         self._results["onchain"] = success
         return success
+
+    def validate_onchain_outputs(self) -> bool:
+        """Validate canonical on-chain outputs before downstream stages."""
+        try:
+            from scripts.verify_onchain_run import validate_onchain_outputs
+
+            failures = validate_onchain_outputs(self.cfg)
+            if failures:
+                for failure in failures:
+                    logger.error(f"On-chain validation failed: {failure}")
+                self._results["onchain_validation"] = False
+                return False
+            self._results["onchain_validation"] = True
+            return True
+        except Exception as exc:
+            logger.error(f"On-chain validation crashed: {exc}")
+            self._results["onchain_validation"] = False
+            return False
 
     def run_clean(self) -> bool:
         """Run data cleaning pipeline."""
@@ -92,59 +158,188 @@ class PipelineRunner:
             return False
 
     def run_features(self) -> bool:
-        """Run FeatureAgentV1 + FeatureAgentV2."""
-        from agents.feature_agent import FeatureAgentV1, FeatureAgentV2
+        """Run canonical FeatureAgent after verified market/onchain outputs exist."""
+        from agents.feature_agent import FeatureAgent
 
-        success_v1 = FeatureAgentV1(self.cfg).execute()
-        if not success_v1:
-            logger.error("FeatureAgentV1 failed")
+        market_path = Path(self.cfg["_project_root"]) / "data/raw/market/market_ohlcv.parquet"
+        onchain_path = Path(self.cfg["_project_root"]) / "data/raw/onchain/onchain_wide.parquet"
+        if not market_path.exists():
+            logger.error("FeatureAgent precheck failed: missing market_ohlcv.parquet")
             self._results["features"] = False
             return False
-
-        success_v2 = FeatureAgentV2(self.cfg).execute()
-        self._results["features"] = success_v2
-        return success_v2
+        if not onchain_path.exists():
+            logger.error("FeatureAgent precheck failed: missing onchain_wide.parquet")
+            self._results["features"] = False
+            return False
+        success = FeatureAgent(self.cfg).execute()
+        if not success:
+            logger.error("FeatureAgent failed")
+            self._results["features"] = False
+            return False
+        full_path = Path(self.cfg["_project_root"]) / str((self.cfg.get("features") or {}).get("output_dir", "data/features")) / "full_features.parquet"
+        if not full_path.exists():
+            logger.error("FeatureAgent postcheck failed: missing full_features.parquet")
+            self._results["features"] = False
+            return False
+        self._results["features"] = True
+        return True
 
     def run_labels(self) -> bool:
-        """Run LabelAgent."""
+        """Run LabelAgent against verified canonical market + feature outputs."""
+        market_path = Path(self.cfg["_project_root"]) / "data/raw/market/market_ohlcv.parquet"
+        full_features_path = Path(self.cfg["_project_root"]) / str((self.cfg.get("features") or {}).get("output_dir", "data/features")) / "full_features.parquet"
+        feature_manifest_path = Path(self.cfg["_project_root"]) / str((self.cfg.get("features") or {}).get("output_dir", "data/features")) / "feature_manifest.json"
+        if not market_path.exists():
+            logger.error("LabelAgent precheck failed: missing market_ohlcv.parquet")
+            self._results["labels"] = False
+            return False
+        if not full_features_path.exists():
+            logger.error("LabelAgent precheck failed: missing full_features.parquet")
+            self._results["labels"] = False
+            return False
+        if not feature_manifest_path.exists():
+            logger.error("LabelAgent precheck failed: missing feature_manifest.json")
+            self._results["labels"] = False
+            return False
+        try:
+            from scripts.verify_feature_run import validate_feature_outputs
+
+            feature_failures = validate_feature_outputs(self.cfg)
+            if feature_failures:
+                for failure in feature_failures:
+                    logger.error(f"Feature validation failed before labels: {failure}")
+                self._results["labels"] = False
+                return False
+        except Exception as exc:
+            logger.error(f"Feature validation precheck for labels crashed: {exc}")
+            self._results["labels"] = False
+            return False
         from agents.label_agent import LabelAgent
         agent = LabelAgent(self.cfg)
         success = agent.execute()
+        if success:
+            try:
+                from scripts.verify_label_run import validate_label_outputs
+
+                failures = validate_label_outputs(self.cfg)
+                if failures:
+                    for failure in failures:
+                        logger.error(f"Label validation failed: {failure}")
+                    success = False
+            except Exception as exc:
+                logger.error(f"Label validation crashed: {exc}")
+                success = False
         self._results["labels"] = success
         return success
 
     def run_models(self, horizons: Optional[List[int]] = None) -> bool:
         """Run ModelAgent for all configured horizons."""
+        feature_manifest = Path(self.cfg["_project_root"]) / "data/features/feature_manifest.json"
+        label_matrix = Path(self.cfg["_project_root"]) / "data/labels/label_matrix.parquet"
+        modeling_dataset = Path(self.cfg["_project_root"]) / "data/labels/modeling_dataset.parquet"
+        if not feature_manifest.exists() or not label_matrix.exists() or not modeling_dataset.exists():
+            logger.error("ModelAgent precheck failed: missing canonical label/feature artifacts")
+            self._results["models"] = False
+            return False
+        try:
+            from scripts.verify_label_run import validate_label_outputs
+
+            label_failures = validate_label_outputs(self.cfg)
+            if label_failures:
+                for failure in label_failures:
+                    logger.error(f"Label validation failed before models: {failure}")
+                self._results["models"] = False
+                return False
+        except Exception as exc:
+            logger.error(f"Label validation precheck for models crashed: {exc}")
+            self._results["models"] = False
+            return False
         from agents.model_agent import ModelAgent
-        mcfg = self.cfg.get("modeling", {})
-        lcfg = self.cfg.get("labels", {})
-        horizons = horizons or lcfg.get("horizons", [7, 14, 30])
-        model_names = mcfg.get("models", ["random_forest", "lightgbm"])
-
-        all_success = True
-        for horizon in horizons:
-            agent = ModelAgent(self.cfg, horizon=horizon, model_names=model_names)
-            success = agent.execute()
-            if not success:
-                all_success = False
-                logger.warning(f"ModelAgent failed for horizon={horizon}d")
-
-        self._results["models"] = all_success
-        return all_success
+        success = ModelAgent(self.cfg).execute()
+        if success:
+            try:
+                from scripts.verify_model_run import validate_model_outputs
+                failures = validate_model_outputs(self.cfg)
+                if failures:
+                    for failure in failures:
+                        logger.error(f"Model validation failed: {failure}")
+                    success = False
+            except Exception as exc:
+                logger.error(f"Model validation crashed: {exc}")
+                success = False
+        self._results["models"] = success
+        return success
 
     def run_portfolio(self, model_name: str = "lightgbm", horizon: int = 7) -> bool:
-        """Run PortfolioAgent."""
+        """Run PortfolioAgent after verified model outputs exist."""
+        pred_path = Path(self.cfg["_project_root"]) / "data/predictions/model_predictions.parquet"
+        board_path = Path(self.cfg["_project_root"]) / "data/predictions/model_leaderboard.parquet"
+        if not pred_path.exists() or not board_path.exists():
+            logger.error("PortfolioAgent precheck failed: missing canonical prediction artifacts")
+            self._results["portfolio"] = False
+            return False
+        try:
+            from scripts.verify_model_run import validate_model_outputs
+            failures = validate_model_outputs(self.cfg)
+            if failures:
+                for failure in failures:
+                    logger.error(f"Model validation failed before portfolio: {failure}")
+                self._results["portfolio"] = False
+                return False
+        except Exception as exc:
+            logger.error(f"Model validation precheck for portfolio crashed: {exc}")
+            self._results["portfolio"] = False
+            return False
         from agents.portfolio_agent import PortfolioAgent
-        agent = PortfolioAgent(self.cfg, model_name=model_name, horizon=horizon)
+        agent = PortfolioAgent(self.cfg)
         success = agent.execute()
+        if success:
+            try:
+                from scripts.verify_portfolio_run import validate_portfolio_outputs
+                failures = validate_portfolio_outputs(self.cfg)
+                if failures:
+                    for failure in failures:
+                        logger.error(f"Portfolio validation failed: {failure}")
+                    success = False
+            except Exception as exc:
+                logger.error(f"Portfolio validation crashed: {exc}")
+                success = False
         self._results["portfolio"] = success
         return success
 
     def run_backtest(self) -> bool:
         """Run BacktestAgent."""
+        allocations_path = Path(self.cfg["_project_root"]) / "data/allocations/allocations_from_predictions.parquet"
+        if not allocations_path.exists():
+            logger.error("BacktestAgent precheck failed: missing allocations_from_predictions.parquet")
+            self._results["backtest"] = False
+            return False
+        try:
+            from scripts.verify_portfolio_run import validate_portfolio_outputs
+            failures = validate_portfolio_outputs(self.cfg)
+            if failures:
+                for failure in failures:
+                    logger.error(f"Portfolio validation failed before backtest: {failure}")
+                self._results["backtest"] = False
+                return False
+        except Exception as exc:
+            logger.error(f"Portfolio validation precheck for backtest crashed: {exc}")
+            self._results["backtest"] = False
+            return False
         from agents.backtest_agent import BacktestAgent
         agent = BacktestAgent(self.cfg)
         success = agent.execute()
+        if success:
+            try:
+                from scripts.verify_backtest_run import validate_backtest_outputs
+                failures = validate_backtest_outputs(self.cfg)
+                if failures:
+                    for failure in failures:
+                        logger.error(f"Backtest validation failed: {failure}")
+                    success = False
+            except Exception as exc:
+                logger.error(f"Backtest validation crashed: {exc}")
+                success = False
         self._results["backtest"] = success
         return success
 
@@ -183,9 +378,13 @@ class PipelineRunner:
                 self._results[stage_name] = success
                 status = "SUCCESS" if success else "FAILED"
                 logger.info(f"Stage {stage_name}: {status}")
+                if not success:
+                    logger.error(f"Stopping pipeline after failed stage: {stage_name}")
+                    break
             except Exception as e:
                 logger.error(f"Stage {stage_name} crashed: {e}")
                 self._results[stage_name] = False
+                break
 
         elapsed = time.time() - start_time
         logger.info("=" * 60)

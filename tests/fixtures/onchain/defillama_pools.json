@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "pool": "pool-uniswap",
+      "project": "uniswap",
+      "symbol": "UNI",
+      "tvlUsd": 500000000,
+      "apy": 12.5
+    },
+    {
+      "pool": "pool-aave",
+      "project": "aave",
+      "symbol": "AAVE",
+      "tvlUsd": 400000000,
+      "apy": 8.0
+    }
+  ]
+}

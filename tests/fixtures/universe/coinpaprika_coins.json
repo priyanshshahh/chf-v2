@@ -1,0 +1,18 @@
+[
+  {"id":"btc-bitcoin","symbol":"BTC","name":"Bitcoin","started_at":"2009-01-03T00:00:00Z"},
+  {"id":"eth-ethereum","symbol":"ETH","name":"Ethereum","started_at":"2015-07-30T00:00:00Z"},
+  {"id":"bnb-binance-coin","symbol":"BNB","name":"BNB","started_at":"2017-07-25T00:00:00Z"},
+  {"id":"sol-solana","symbol":"SOL","name":"Solana","started_at":"2020-03-16T00:00:00Z"},
+  {"id":"xrp-xrp","symbol":"XRP","name":"XRP","started_at":"2013-08-04T00:00:00Z"},
+  {"id":"ada-cardano","symbol":"ADA","name":"Cardano","started_at":"2017-10-01T00:00:00Z"},
+  {"id":"avax-avalanche","symbol":"AVAX","name":"Avalanche","started_at":"2020-09-22T00:00:00Z"},
+  {"id":"doge-dogecoin","symbol":"DOGE","name":"Dogecoin","started_at":"2013-12-08T00:00:00Z"},
+  {"id":"dot-polkadot","symbol":"DOT","name":"Polkadot","started_at":"2020-08-19T00:00:00Z"},
+  {"id":"link-chainlink","symbol":"LINK","name":"Chainlink","started_at":"2017-09-20T00:00:00Z"},
+  {"id":"matic-polygon","symbol":"MATIC","name":"Polygon","started_at":"2019-04-26T00:00:00Z"},
+  {"id":"ltc-litecoin","symbol":"LTC","name":"Litecoin","started_at":"2011-10-13T00:00:00Z"},
+  {"id":"bch-bitcoin-cash","symbol":"BCH","name":"Bitcoin Cash","started_at":"2017-08-01T00:00:00Z"},
+  {"id":"atom-cosmos","symbol":"ATOM","name":"Cosmos Hub","started_at":"2019-03-14T00:00:00Z"},
+  {"id":"near-near-protocol","symbol":"NEAR","name":"NEAR Protocol","started_at":"2020-10-13T00:00:00Z"},
+  {"id":"icp-internet-computer","symbol":"ICP","name":"Internet Computer","started_at":"2021-05-10T00:00:00Z"}
+]

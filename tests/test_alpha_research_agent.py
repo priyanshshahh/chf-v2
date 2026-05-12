@@ -180,7 +180,12 @@ def test_optional_prediction_export_is_portfolio_safe(tmp_path):
     cfg["alpha_research"]["export_candidate_to_predictions"] = True
     _write_inputs(tmp_path)
     assert AlphaResearchAgent(cfg).execute(max_retries=1)
-    compat = pd.read_parquet(tmp_path / "data" / "predictions" / "model_predictions.parquet")
+    export_path = tmp_path / "data" / "predictions" / "model_predictions.parquet"
+    lb = pd.read_parquet(tmp_path / "data" / "research" / "research_leaderboard.parquet")
+    if not lb["candidate_for_backtest"].any():
+        assert not export_path.exists()
+        return
+    compat = pd.read_parquet(export_path)
     forbidden = ("actual", "label", "future", "realized", "target", "y_")
     assert not [c for c in compat.columns if any(tok in c.lower() for tok in forbidden)]
 

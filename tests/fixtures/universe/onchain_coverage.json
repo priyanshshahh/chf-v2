@@ -1,0 +1,18 @@
+{
+  "BTC": "coinmetrics",
+  "ETH": "coinmetrics",
+  "BNB": "defillama",
+  "SOL": "coinmetrics",
+  "XRP": "coinmetrics",
+  "ADA": "coinmetrics",
+  "AVAX": "coinmetrics",
+  "DOGE": "coinmetrics",
+  "DOT": "coinmetrics",
+  "LINK": "coinmetrics",
+  "MATIC": "coinmetrics",
+  "LTC": "coinmetrics",
+  "BCH": "coinmetrics",
+  "ATOM": "coinmetrics",
+  "NEAR": "defillama",
+  "ICP": "defillama"
+}

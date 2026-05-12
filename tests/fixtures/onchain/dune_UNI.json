@@ -1,0 +1,166 @@
+{
+  "result": {
+    "rows": [
+      {
+        "date": "2026-03-15",
+        "curated_protocol_metric": 42.0
+      },
+      {
+        "date": "2026-03-16",
+        "curated_protocol_metric": 43.0
+      },
+      {
+        "date": "2026-03-17",
+        "curated_protocol_metric": 44.0
+      },
+      {
+        "date": "2026-03-18",
+        "curated_protocol_metric": 45.0
+      },
+      {
+        "date": "2026-03-19",
+        "curated_protocol_metric": 46.0
+      },
+      {
+        "date": "2026-03-20",
+        "curated_protocol_metric": 47.0
+      },
+      {
+        "date": "2026-03-21",
+        "curated_protocol_metric": 48.0
+      },
+      {
+        "date": "2026-03-22",
+        "curated_protocol_metric": 49.0
+      },
+      {
+        "date": "2026-03-23",
+        "curated_protocol_metric": 50.0
+      },
+      {
+        "date": "2026-03-24",
+        "curated_protocol_metric": 51.0
+      },
+      {
+        "date": "2026-03-25",
+        "curated_protocol_metric": 52.0
+      },
+      {
+        "date": "2026-03-26",
+        "curated_protocol_metric": 53.0
+      },
+      {
+        "date": "2026-03-27",
+        "curated_protocol_metric": 54.0
+      },
+      {
+        "date": "2026-03-28",
+        "curated_protocol_metric": 55.0
+      },
+      {
+        "date": "2026-03-29",
+        "curated_protocol_metric": 56.0
+      },
+      {
+        "date": "2026-03-30",
+        "curated_protocol_metric": 57.0
+      },
+      {
+        "date": "2026-03-31",
+        "curated_protocol_metric": 58.0
+      },
+      {
+        "date": "2026-04-01",
+        "curated_protocol_metric": 59.0
+      },
+      {
+        "date": "2026-04-02",
+        "curated_protocol_metric": 60.0
+      },
+      {
+        "date": "2026-04-03",
+        "curated_protocol_metric": 61.0
+      },
+      {
+        "date": "2026-04-04",
+        "curated_protocol_metric": 62.0
+      },
+      {
+        "date": "2026-04-05",
+        "curated_protocol_metric": 63.0
+      },
+      {
+        "date": "2026-04-06",
+        "curated_protocol_metric": 64.0
+      },
+      {
+        "date": "2026-04-07",
+        "curated_protocol_metric": 65.0
+      },
+      {
+        "date": "2026-04-08",
+        "curated_protocol_metric": 66.0
+      },
+      {
+        "date": "2026-04-09",
+        "curated_protocol_metric": 67.0
+      },
+      {
+        "date": "2026-04-10",
+        "curated_protocol_metric": 68.0
+      },
+      {
+        "date": "2026-04-11",
+        "curated_protocol_metric": 69.0
+      },
+      {
+        "date": "2026-04-12",
+        "curated_protocol_metric": 70.0
+      },
+      {
+        "date": "2026-04-13",
+        "curated_protocol_metric": 71.0
+      },
+      {
+        "date": "2026-04-14",
+        "curated_protocol_metric": 72.0
+      },
+      {
+        "date": "2026-04-15",
+        "curated_protocol_metric": 73.0
+      },
+      {
+        "date": "2026-04-16",
+        "curated_protocol_metric": 74.0
+      },
+      {
+        "date": "2026-04-17",
+        "curated_protocol_metric": 75.0
+      },
+      {
+        "date": "2026-04-18",
+        "curated_protocol_metric": 76.0
+      },
+      {
+        "date": "2026-04-19",
+        "curated_protocol_metric": 77.0
+      },
+      {
+        "date": "2026-04-20",
+        "curated_protocol_metric": 78.0
+      },
+      {
+        "date": "2026-04-21",
+        "curated_protocol_metric": 79.0
+      },
+      {
+        "date": "2026-04-22",
+        "curated_protocol_metric": 80.0
+      },
+      {
+        "date": "2026-04-23",
+        "curated_protocol_metric": 81.0
+      }
+    ]
+  }
+}

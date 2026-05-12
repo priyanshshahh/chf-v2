@@ -1,0 +1,22 @@
+[
+  {"id":"bitcoin","symbol":"btc","name":"Bitcoin","market_cap_rank":1,"market_cap":800000000000,"total_volume":25000000000,"current_price":42000,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"ethereum","symbol":"eth","name":"Ethereum","market_cap_rank":2,"market_cap":300000000000,"total_volume":15000000000,"current_price":2500,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"tether","symbol":"usdt","name":"Tether USD","market_cap_rank":3,"market_cap":90000000000,"total_volume":30000000000,"current_price":1,"last_updated":"2024-01-01T00:00:00Z","categories":["stablecoins"]},
+  {"id":"binancecoin","symbol":"bnb","name":"BNB","market_cap_rank":4,"market_cap":50000000000,"total_volume":1200000000,"current_price":310,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"solana","symbol":"sol","name":"Solana","market_cap_rank":5,"market_cap":40000000000,"total_volume":2500000000,"current_price":100,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"wrapped-bitcoin","symbol":"wbtc","name":"Wrapped Bitcoin","market_cap_rank":6,"market_cap":11000000000,"total_volume":300000000,"current_price":42000,"last_updated":"2024-01-01T00:00:00Z","categories":["wrapped-tokens"]},
+  {"id":"xrp","symbol":"xrp","name":"XRP","market_cap_rank":7,"market_cap":30000000000,"total_volume":1300000000,"current_price":0.6,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"cardano","symbol":"ada","name":"Cardano","market_cap_rank":8,"market_cap":21000000000,"total_volume":700000000,"current_price":0.5,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"avalanche-2","symbol":"avax","name":"Avalanche","market_cap_rank":9,"market_cap":15000000000,"total_volume":600000000,"current_price":37,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"staked-ether","symbol":"steth","name":"Lido Staked Ether","market_cap_rank":10,"market_cap":13000000000,"total_volume":80000000,"current_price":2500,"last_updated":"2024-01-01T00:00:00Z","categories":["liquid-staking-tokens"]},
+  {"id":"dogecoin","symbol":"doge","name":"Dogecoin","market_cap_rank":11,"market_cap":12000000000,"total_volume":500000000,"current_price":0.08,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"polkadot","symbol":"dot","name":"Polkadot","market_cap_rank":12,"market_cap":10000000000,"total_volume":300000000,"current_price":7,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"chainlink","symbol":"link","name":"Chainlink","market_cap_rank":13,"market_cap":9000000000,"total_volume":250000000,"current_price":15,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"matic-network","symbol":"matic","name":"Polygon","market_cap_rank":14,"market_cap":8000000000,"total_volume":240000000,"current_price":0.85,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"litecoin","symbol":"ltc","name":"Litecoin","market_cap_rank":15,"market_cap":7000000000,"total_volume":220000000,"current_price":75,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"bitcoin-cash","symbol":"bch","name":"Bitcoin Cash","market_cap_rank":16,"market_cap":6000000000,"total_volume":210000000,"current_price":250,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"axelar-wrapped-usdc","symbol":"axlusdc","name":"Axelar Bridged USDC","market_cap_rank":17,"market_cap":5000000000,"total_volume":200000000,"current_price":1,"last_updated":"2024-01-01T00:00:00Z","categories":["bridged-tokens"]},
+  {"id":"cosmos","symbol":"atom","name":"Cosmos Hub","market_cap_rank":18,"market_cap":4500000000,"total_volume":190000000,"current_price":10,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"near","symbol":"near","name":"NEAR Protocol","market_cap_rank":19,"market_cap":4200000000,"total_volume":180000000,"current_price":4,"last_updated":"2024-01-01T00:00:00Z","categories":[]},
+  {"id":"internet-computer","symbol":"icp","name":"Internet Computer","market_cap_rank":20,"market_cap":4000000000,"total_volume":170000000,"current_price":11,"last_updated":"2024-01-01T00:00:00Z","categories":[]}
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Ethereum",
+    "tokenSymbol": "ETH",
+    "gecko_id": "ethereum"
+  },
+  {
+    "name": "Solana",
+    "tokenSymbol": "SOL",
+    "gecko_id": "solana"
+  },
+  {
+    "name": "BSC",
+    "tokenSymbol": "BNB",
+    "gecko_id": "binancecoin"
+  },
+  {
+    "name": "Tron",
+    "tokenSymbol": "TRX",
+    "gecko_id": "tron"
+  },
+  {
+    "name": "Cardano",
+    "tokenSymbol": "ADA",
+    "gecko_id": "cardano"
+  }
+]

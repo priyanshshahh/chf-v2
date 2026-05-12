@@ -18,10 +18,13 @@ Everything here has been tested on macOS with Python 3.11 (Anaconda).
 ## 2. First-Time Setup
 
 ```bash
-cd ~/Desktop/manus\ chf/chf
+cd /path/to/chf
 
-# Install all dependencies
-pip install -r requirements.txt
+# Option A (recommended): create a local venv + install deps
+make setup
+
+# Option B: install into your current Python environment
+# pip install -r requirements.txt
 
 # Run bootstrap (creates directories, copies .env)
 python scripts/bootstrap.py
@@ -41,7 +44,7 @@ Bootstrap complete. Ready to run!
 ## 3. Run the Smoke Test (No API Keys Needed)
 
 ```bash
-cd ~/Desktop/manus\ chf/chf
+cd /path/to/chf
 python scripts/smoke_test.py
 ```
 
@@ -65,7 +68,7 @@ ALL TESTS PASSED ✅
 ## 4. Demo Mode (No API Keys — Synthetic Data)
 
 ```bash
-cd ~/Desktop/manus\ chf/chf
+cd /path/to/chf
 python main.py demo
 streamlit run app/dashboard.py
 ```
@@ -81,8 +84,8 @@ Opens the dashboard at http://localhost:8501 with synthetic data for all 6 views
 ```bash
 cp .env.example .env
 # Edit .env and add:
-# COINGECKO_API_KEY=your_key_here   (optional — free tier works without key)
-# COINMETRICS_API_KEY=your_key_here (optional — community tier works without key)
+COINGECKO_API_KEY is optional; free tier works without a key.
+COINMETRICS_API_KEY is optional; community tier works without a key.
 ```
 
 ### 5.2 Run Full Pipeline

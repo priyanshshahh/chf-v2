@@ -1,0 +1,90 @@
+denylist_symbols:
+  - USDT
+  - USDC
+  - DAI
+  - FDUSD
+  - TUSD
+  - BUSD
+  - USDE
+  - PYUSD
+  - FRAX
+  - LUSD
+  - GUSD
+  - WBTC
+  - WETH
+  - STETH
+  - RETH
+  - CBETH
+  - JITOSOL
+  - MSOL
+  - EURC
+  - PAXG
+  - XAUT
+  - USDT
+  - USDC
+  - DAI
+  - TUSD
+  - FDUSD
+  - PYUSD
+  - USDD
+  - USDE
+  - EURT
+  - EURS
+  - DGX
+
+stable_keywords:
+  - stablecoin
+  - stable
+  - usd
+  - usdt
+  - usdc
+  - dai
+  - busd
+  - fdusd
+  - tusd
+  - usde
+  - frax
+  - lusd
+  - pyusd
+
+wrapped_keywords:
+  - wrapped
+  - wrapped bitcoin
+  - wrapped ether
+  - wbtc
+  - weth
+  - binance-peg
+  - pegged
+
+bridged_keywords:
+  - bridged
+  - bridge
+  - wormhole
+  - portal
+  - axelar
+  - axl
+
+lst_keywords:
+  - staked
+  - staking
+  - liquid staking
+  - steth
+  - reth
+  - cbeth
+  - jitosol
+  - msol
+  - sfrxeth
+
+synthetic_pegged_keywords:
+  - synthetic
+  - pegged
+  - mirror
+  - derivative
+
+category_denylist:
+  - stablecoins
+  - usd-stablecoin
+  - asset-backed-tokens
+  - wrapped-tokens
+  - bridged-tokens
+  - liquid-staking-tokens

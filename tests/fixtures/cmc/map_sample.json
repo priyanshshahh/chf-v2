@@ -1,0 +1,23 @@
+{
+  "status": {
+    "timestamp": "2026-04-30T00:00:00.000Z",
+    "error_code": 0,
+    "error_message": null
+  },
+  "data": [
+    {
+      "id": 1,
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "slug": "bitcoin",
+      "is_active": 1
+    },
+    {
+      "id": 1027,
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "slug": "ethereum",
+      "is_active": 1
+    }
+  ]
+}

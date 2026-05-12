@@ -10,7 +10,9 @@ flowchart TD
         UA["UniverseAgent\nTop-100 filter\nmonthly snapshot"]
         MDA["MarketDataAgent\nOHLCV backfill\nhive-partitioned Parquet"]
         OCA["OnChainAgent\nNVT, MVRV, AdrAct\nTVL"]
-        FA["FeatureAgent\n15+ features\nnumba beta kernel"]
+        CLEAN["Clean Stage\nMarket + on-chain normalization"]
+        FA1["FeatureAgentV1\nmarket features\nwinsorize + z-score"]
+        FA2["FeatureAgentV2\nmerge on-chain + prune\nfeature_keep_list.json"]
         LA["LabelAgent\nfwd_return_7d\nno look-ahead"]
         MA["ModelAgent\nRF + LightGBM\nMLflow tracking"]
         PA["PortfolioAgent\nTop-K EW\nScore-prop"]
@@ -19,8 +21,9 @@ flowchart TD
 
     subgraph STORAGE["Storage Layer"]
         RAW["data/raw/\nmarket/year=YYYY/month=MM/\nuniverse/\nonchain/"]
-        FEAT["data/features/\nfeature_store.parquet"]
-        LABELS["data/labels/\nlabels_7d.parquet"]
+        CLEANED["data/cleaned/\n*_ohlcv_clean.parquet\n*_onchain_clean.parquet"]
+        FEAT["data/features/\nmarket_features.parquet\nfull_features.parquet"]
+        LABELS["data/labels/\nlabels_{horizon}d.parquet"]
         PREDS["data/predictions/\npredictions_*.parquet"]
         ALLOC["data/allocations/\nallocations_*.parquet"]
         BT["data/backtests/\nequity_curves.parquet\nbacktest_summary.parquet\nvbt_stats.json"]
@@ -42,8 +45,12 @@ flowchart TD
     MDA --> RAW
     OCA --> RAW
 
-    RAW --> FA
-    FA --> FEAT
+    RAW --> CLEAN
+    CLEAN --> CLEANED
+    CLEANED --> FA1
+    FA1 --> FEAT
+    FEAT --> FA2
+    FA2 --> FEAT
     FEAT --> LA
     LA --> LABELS
 

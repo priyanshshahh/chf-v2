@@ -1,0 +1,244 @@
+{
+  "data": [
+    {
+      "date": "2026-03-15",
+      "transaction_count": 300000,
+      "output_volume": 1000000000,
+      "fee_total": 50000
+    },
+    {
+      "date": "2026-03-16",
+      "transaction_count": 300001,
+      "output_volume": 1000001000,
+      "fee_total": 50001
+    },
+    {
+      "date": "2026-03-17",
+      "transaction_count": 300002,
+      "output_volume": 1000002000,
+      "fee_total": 50002
+    },
+    {
+      "date": "2026-03-18",
+      "transaction_count": 300003,
+      "output_volume": 1000003000,
+      "fee_total": 50003
+    },
+    {
+      "date": "2026-03-19",
+      "transaction_count": 300004,
+      "output_volume": 1000004000,
+      "fee_total": 50004
+    },
+    {
+      "date": "2026-03-20",
+      "transaction_count": 300005,
+      "output_volume": 1000005000,
+      "fee_total": 50005
+    },
+    {
+      "date": "2026-03-21",
+      "transaction_count": 300006,
+      "output_volume": 1000006000,
+      "fee_total": 50006
+    },
+    {
+      "date": "2026-03-22",
+      "transaction_count": 300007,
+      "output_volume": 1000007000,
+      "fee_total": 50007
+    },
+    {
+      "date": "2026-03-23",
+      "transaction_count": 300008,
+      "output_volume": 1000008000,
+      "fee_total": 50008
+    },
+    {
+      "date": "2026-03-24",
+      "transaction_count": 300009,
+      "output_volume": 1000009000,
+      "fee_total": 50009
+    },
+    {
+      "date": "2026-03-25",
+      "transaction_count": 300010,
+      "output_volume": 1000010000,
+      "fee_total": 50010
+    },
+    {
+      "date": "2026-03-26",
+      "transaction_count": 300011,
+      "output_volume": 1000011000,
+      "fee_total": 50011
+    },
+    {
+      "date": "2026-03-27",
+      "transaction_count": 300012,
+      "output_volume": 1000012000,
+      "fee_total": 50012
+    },
+    {
+      "date": "2026-03-28",
+      "transaction_count": 300013,
+      "output_volume": 1000013000,
+      "fee_total": 50013
+    },
+    {
+      "date": "2026-03-29",
+      "transaction_count": 300014,
+      "output_volume": 1000014000,
+      "fee_total": 50014
+    },
+    {
+      "date": "2026-03-30",
+      "transaction_count": 300015,
+      "output_volume": 1000015000,
+      "fee_total": 50015
+    },
+    {
+      "date": "2026-03-31",
+      "transaction_count": 300016,
+      "output_volume": 1000016000,
+      "fee_total": 50016
+    },
+    {
+      "date": "2026-04-01",
+      "transaction_count": 300017,
+      "output_volume": 1000017000,
+      "fee_total": 50017
+    },
+    {
+      "date": "2026-04-02",
+      "transaction_count": 300018,
+      "output_volume": 1000018000,
+      "fee_total": 50018
+    },
+    {
+      "date": "2026-04-03",
+      "transaction_count": 300019,
+      "output_volume": 1000019000,
+      "fee_total": 50019
+    },
+    {
+      "date": "2026-04-04",
+      "transaction_count": 300020,
+      "output_volume": 1000020000,
+      "fee_total": 50020
+    },
+    {
+      "date": "2026-04-05",
+      "transaction_count": 300021,
+      "output_volume": 1000021000,
+      "fee_total": 50021
+    },
+    {
+      "date": "2026-04-06",
+      "transaction_count": 300022,
+      "output_volume": 1000022000,
+      "fee_total": 50022
+    },
+    {
+      "date": "2026-04-07",
+      "transaction_count": 300023,
+      "output_volume": 1000023000,
+      "fee_total": 50023
+    },
+    {
+      "date": "2026-04-08",
+      "transaction_count": 300024,
+      "output_volume": 1000024000,
+      "fee_total": 50024
+    },
+    {
+      "date": "2026-04-09",
+      "transaction_count": 300025,
+      "output_volume": 1000025000,
+      "fee_total": 50025
+    },
+    {
+      "date": "2026-04-10",
+      "transaction_count": 300026,
+      "output_volume": 1000026000,
+      "fee_total": 50026
+    },
+    {
+      "date": "2026-04-11",
+      "transaction_count": 300027,
+      "output_volume": 1000027000,
+      "fee_total": 50027
+    },
+    {
+      "date": "2026-04-12",
+      "transaction_count": 300028,
+      "output_volume": 1000028000,
+      "fee_total": 50028
+    },
+    {
+      "date": "2026-04-13",
+      "transaction_count": 300029,
+      "output_volume": 1000029000,
+      "fee_total": 50029
+    },
+    {
+      "date": "2026-04-14",
+      "transaction_count": 300030,
+      "output_volume": 1000030000,
+      "fee_total": 50030
+    },
+    {
+      "date": "2026-04-15",
+      "transaction_count": 300031,
+      "output_volume": 1000031000,
+      "fee_total": 50031
+    },
+    {
+      "date": "2026-04-16",
+      "transaction_count": 300032,
+      "output_volume": 1000032000,
+      "fee_total": 50032
+    },
+    {
+      "date": "2026-04-17",
+      "transaction_count": 300033,
+      "output_volume": 1000033000,
+      "fee_total": 50033
+    },
+    {
+      "date": "2026-04-18",
+      "transaction_count": 300034,
+      "output_volume": 1000034000,
+      "fee_total": 50034
+    },
+    {
+      "date": "2026-04-19",
+      "transaction_count": 300035,
+      "output_volume": 1000035000,
+      "fee_total": 50035
+    },
+    {
+      "date": "2026-04-20",
+      "transaction_count": 300036,
+      "output_volume": 1000036000,
+      "fee_total": 50036
+    },
+    {
+      "date": "2026-04-21",
+      "transaction_count": 300037,
+      "output_volume": 1000037000,
+      "fee_total": 50037
+    },
+    {
+      "date": "2026-04-22",
+      "transaction_count": 300038,
+      "output_volume": 1000038000,
+      "fee_total": 50038
+    },
+    {
+      "date": "2026-04-23",
+      "transaction_count": 300039,
+      "output_volume": 1000039000,
+      "fee_total": 50039
+    }
+  ]
+}

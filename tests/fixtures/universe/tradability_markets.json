@@ -1,0 +1,21 @@
+{
+  "coinbase": {
+    "BTC/USD": {"symbol": "BTC/USD"},
+    "ETH/USD": {"symbol": "ETH/USD"},
+    "BNB/USD": {"symbol": "BNB/USD"},
+    "SOL/USD": {"symbol": "SOL/USD"},
+    "XRP/USD": {"symbol": "XRP/USD"},
+    "ADA/USD": {"symbol": "ADA/USD"},
+    "AVAX/USD": {"symbol": "AVAX/USD"},
+    "DOGE/USD": {"symbol": "DOGE/USD"},
+    "DOT/USD": {"symbol": "DOT/USD"},
+    "LINK/USD": {"symbol": "LINK/USD"},
+    "MATIC/USD": {"symbol": "MATIC/USD"},
+    "LTC/USD": {"symbol": "LTC/USD"},
+    "BCH/USD": {"symbol": "BCH/USD"},
+    "ATOM/USD": {"symbol": "ATOM/USD"},
+    "NEAR/USD": {"symbol": "NEAR/USD"},
+    "ICP/USD": {"symbol": "ICP/USD"}
+  },
+  "kraken": {}
+}

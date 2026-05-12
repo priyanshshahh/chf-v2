@@ -23,18 +23,27 @@ All features are computed with **no look-ahead**: at time `t`, only data availab
 
 Source: Binance via CCXT. Hive-partitioned by year and month.
 
-### 1.2 Universe (`data/raw/universe/universe_YYYYMMDD.parquet`)
+### 1.2 Universe (`data/raw/universe/universe_YYYYMM.parquet`)
+
+Monthly snapshot built by `UniverseAgent` from CoinGecko `/coins/markets` (+ per-coin metadata for categories).
 
 | Column | Type | Description |
 |---|---|---|
-| `symbol` | str | Ticker symbol |
+| `symbol` | str | Ticker symbol (uppercased) |
+| `coingecko_id` | str | CoinGecko coin id |
 | `name` | str | Full asset name |
-| `market_cap_usd` | float64 | Market cap at snapshot date |
 | `rank` | int | CoinGecko market cap rank |
-| `eligible` | bool | Passes all filters |
-| `snapshot_date` | date | Date of snapshot |
-
-Source: CoinGecko `/coins/markets`. Excludes stablecoins, wrapped tokens, synthetic assets.
+| `market_cap_usd` | float64 | Market cap at snapshot time |
+| `volume_24h_usd` | float64 | 24h volume at snapshot time |
+| `categories` | object | Category list (may be empty) |
+| `is_stablecoin` | bool | Stablecoin heuristic flag |
+| `is_wrapped` | bool | Wrapped/synthetic heuristic flag |
+| `is_excluded` | bool | True if filtered out |
+| `exclusion_reason` | str | Reason string when excluded |
+| `retrieved_at` | datetime[str] | UTC timestamp string when fetched |
+| `snapshot_id` | str | Snapshot identifier |
+| `run_id` | str | Agent run identifier |
+| `source` | str | Data source tag (e.g. `coingecko`) |
 
 ### 1.3 On-Chain (`data/raw/onchain/SYMBOL_onchain.parquet`)
 
@@ -42,96 +51,87 @@ Source: CoinGecko `/coins/markets`. Excludes stablecoins, wrapped tokens, synthe
 |---|---|---|
 | `symbol` | str | Ticker symbol |
 | `date_ts` | datetime[UTC] | UTC midnight timestamp |
-| `active_addresses` | float64 | Daily active addresses (AdrActCnt) |
-| `tx_volume_usd` | float64 | Adjusted transfer volume in USD (TxTfrValAdjUSD) |
-| `realized_cap_usd` | float64 | Realized market cap in USD (CapRealUSD) |
-| `mvrv` | float64 | MVRV ratio (CapMVRVCur, if available) |
-| `tvl_usd` | float64 | Total Value Locked in USD (DeFiLlama) |
+| `AdrActCnt` | float64 | Daily active addresses (CoinMetrics) |
+| `TxCnt` | float64 | Daily transaction count (CoinMetrics) |
+| `CapRealUSD` | float64 | Realized market cap in USD (CoinMetrics) |
+| `CapMVRVCur` | float64 | MVRV ratio (CoinMetrics, if available) |
+| `TxTfrValAdjUSD` | float64 | Adjusted transfer volume in USD (CoinMetrics, if available) |
+| `FeeTotUSD` | float64 | Total fees in USD (CoinMetrics, if available) |
+| `NVTAdj` | float64 | NVT adjusted (CoinMetrics, if available) |
+| `tvl_usd` | float64 | Total Value Locked in USD (DeFiLlama, if available) |
+| `fees_usd` | float64 | Protocol fees in USD (DeFiLlama, if available) |
+| `dex_volume_usd` | float64 | DEX volume in USD (DeFiLlama, if available) |
 
 Sources: CoinMetrics Community API, DeFiLlama.
 
 ---
 
-## 2. Feature Store (`data/features/feature_store.parquet`)
+## 2. Feature Store (`data/features/market_features.parquet`, `data/features/full_features.parquet`)
 
-### 2.1 Momentum Features
+CHF writes two feature-store files:
 
-| Feature | Formula | Window | Source |
-|---|---|---|---|
-| `momentum_7d` | `ln(P_t / P_{t-7})` | 7 days | OHLCV close |
-| `momentum_14d` | `ln(P_t / P_{t-14})` | 14 days | OHLCV close |
-| `momentum_30d` | `ln(P_t / P_{t-30})` | 30 days | OHLCV close |
-| `momentum_90d` | `ln(P_t / P_{t-90})` | 90 days | OHLCV close |
+- `market_features.parquet` from `FeatureAgentV1` (market-derived)
+- `full_features.parquet` from `FeatureAgentV2` (market + on-chain merge + pruning metadata)
 
-**Implementation:** `features/feature_engineering.py::compute_log_returns()`
+### 2.1 Market Features (FeatureAgentV1)
 
-### 2.2 Volatility Features
+All are computed per-symbol and aligned “as of” `date_ts` (no look-ahead):
 
-| Feature | Formula | Window | Source |
-|---|---|---|---|
-| `volatility_30d` | `σ(r_{t-30:t}) × √365` | 30 days | Daily log returns |
-| `skewness_30d` | `skew(r_{t-30:t})` | 30 days | Daily log returns |
+| Feature | Formula / Meaning |
+|---|---|
+| `ret_{n}d` | `ln(P_t / P_{t-n})` for `n` in `features.return_windows` |
+| `vol_{w}d` | rolling `std(daily_log_return, w) * sqrt(365)` |
+| `skew_{w}d` | rolling skewness of daily log returns |
+| `beta_btc_{w}d` | `Cov(R_i, R_BTC) / Var(R_BTC)` over window `w` |
+| `vol_ratio_{w}d` | rolling mean volume / overall mean volume |
+| `reversal_3_30` | short-term return minus long-term return |
+| `atr_14d` | ATR proxy: rolling mean of `(high-low)/close` |
 
-Where `r_t = ln(P_t / P_{t-1})` (daily log return).
+Cross-sectional z-scores are appended with a `_cs` suffix (example: `ret_7d_cs`) when enabled by `features.zscore_cross_sectional`.
 
-**Implementation:** `features/feature_engineering.py::compute_rolling_volatility()`, `compute_rolling_skewness()`
+Implementation: `agents/feature_agent.py::FeatureAgentV1` and `features/feature_engineering.py`.
 
-### 2.3 Beta Feature
+### 2.2 On-Chain Features (FeatureAgentV2)
 
-| Feature | Formula | Window | Source |
-|---|---|---|---|
-| `beta_60d` | `Cov(R_i, R_BTC) / Var(R_BTC)` | 60 days | Daily log returns vs BTC |
+These are computed from `data/raw/onchain/*` and merged onto the market feature store:
 
-**Implementation:** `features/feature_engineering.py::compute_rolling_beta()`
+| Feature | Meaning |
+|---|---|
+| `adr_growth_30d` | `ln(AdrActCnt_t / AdrActCnt_{t-30})` |
+| `tx_growth_30d` | `ln(TxCnt_t / TxCnt_{t-30})` |
+| `nvt_ratio` | network value to transactions proxy (price / TxTfrValAdjUSD) |
+| `nvt_signal_90d` | rolling mean of `nvt_ratio` (90d) |
+| `mvrv_proxy` | proxy from CoinMetrics `CapMVRVCur`, else computed from realized cap |
+| `realized_cap_change_30d` | `ln(CapRealUSD_t / CapRealUSD_{t-30})` |
+| `fee_intensity` | fees scaled by a market-cap proxy |
+| `tvl_ratio` | TVL scaled by a market-cap proxy |
+| `tvl_growth_30d` | `ln(TVL_t / TVL_{t-30})` |
 
-**Numba acceleration:** The rolling beta kernel `_rolling_beta_kernel()` is decorated with `@numba.njit(cache=True)` when numba is installed. The kernel iterates over a sliding window computing covariance and variance from scratch, avoiding Python overhead. When numba is not installed, a pure-NumPy fallback is used automatically.
+### 2.3 Feature Dictionary / Keep List
 
-**Why numba only here:** `pandas.rolling()` (used for volatility, skewness, momentum) is already backed by Cython/C. Adding `@numba.jit` to those would add JIT compilation overhead without speed benefit. The beta kernel requires a nested loop over two aligned arrays simultaneously, which pandas cannot express natively — that is where numba provides a real speedup.
-
-### 2.4 Volume Feature
-
-| Feature | Formula | Window | Source |
-|---|---|---|---|
-| `turnover_ratio` | `MA(Volume_{t-30:t}) / mean(Volume_all)` | 30 days | OHLCV volume |
-
-**Implementation:** `features/feature_engineering.py::compute_turnover_ratio()`
-
-### 2.5 On-Chain Features
-
-| Feature | Formula | Source | Proxy? |
-|---|---|---|---|
-| `nvt_ratio` | `log1p(Market_Cap / MA(TxTfrValAdjUSD, 7))` | CoinMetrics | Proxy: uses TxTfrValAdjUSD as tx volume |
-| `mvrv_proxy` | `Market_Cap / CapRealUSD` | CoinMetrics | Proxy: uses realized cap from CoinMetrics |
-| `active_address_growth` | `ln(AdrActCnt_t / AdrActCnt_{t-30})` | CoinMetrics | No |
-| `tvl_ratio` | `TVL_USD / Market_Cap` | DeFiLlama | Proxy: only available for DeFi protocols |
-
-**Implementation:** `features/feature_engineering.py::compute_nvt_ratio()`, `compute_mvrv_proxy()`, `compute_active_address_growth()`, `compute_tvl_ratio()`
-
-### 2.6 Cross-Sectional Normalization
-
-All features are normalized cross-sectionally at each date `t`:
-
-```
-Z_{i,t} = (X_{i,t} - mean_t(X)) / std_t(X)
-```
-
-Where `mean_t` and `std_t` are computed across all assets in the universe at date `t`.
-
-**Implementation:** `features/feature_engineering.py::cross_sectional_zscore()`
+- `data/features/feature_dictionary.json`: human-readable definitions (from `features.feature_engineering.FEATURE_DICTIONARY`)
+- `data/features/feature_keep_list.json`: correlation-cluster pruning output (written by `FeatureAgentV2`)
 
 ---
 
-## 3. Labels (`data/labels/labels_7d.parquet`)
+## 3. Labels (`data/labels/labels_{horizon}d.parquet`)
 
-| Label | Formula | Horizon |
-|---|---|---|
-| `fwd_return_7d` | `ln(P_{t+7} / P_t)` | 7 days |
-| `fwd_return_14d` | `ln(P_{t+14} / P_t)` | 14 days |
-| `fwd_return_30d` | `ln(P_{t+30} / P_t)` | 30 days |
+Labels are stored in long format with one numeric target:
 
-**Look-ahead prevention:** The final `horizon` days of each symbol's time series are dropped (they would require future prices not yet available).
+`label_value = ln(P_{t+h} / P_t)`
 
-**Implementation:** `agents/label_agent.py`
+| Column | Description |
+|---|---|
+| `symbol` | Asset ticker |
+| `date_ts` | Feature/label “as of” timestamp |
+| `horizon_days` | Horizon `h` in days |
+| `label_value` | Forward log return |
+| `label_type` | Always `log_return` in the current implementation |
+| `is_complete` | True when `P_{t+h}` exists (incomplete tails are optionally dropped) |
+| `snapshot_id` | Snapshot identifier |
+| `run_id` | Agent run identifier |
+
+Implementation: `agents/label_agent.py::LabelAgent`
 
 ---
 
@@ -141,11 +141,15 @@ Where `mean_t` and `std_t` are computed across all assets in the universe at dat
 |---|---|
 | `symbol` | Asset ticker |
 | `date_ts` | Prediction date |
-| `predicted_score` | Model output (continuous rank score) |
+| `predicted_return` | Model output (regression prediction for the configured label) |
+| `actual_return` | Realized label value for the fold (validation rows only) |
 | `model_name` | `lightgbm` or `random_forest` |
-| `horizon` | Label horizon in days |
+| `horizon_days` | Label horizon in days |
 | `fold_id` | Walk-forward fold index |
-| `snapshot_id` | Run identifier |
+| `model_version` | Model code version tag (string) |
+| `feature_version` | Feature version tag (string) |
+| `snapshot_id` | Snapshot identifier |
+| `run_id` | Agent run identifier |
 
 ---
 
@@ -180,7 +184,7 @@ Computed per fold and averaged. Target: `|IC| > 0.02`.
 ### 6.2 Hit Rate
 
 ```
-Hit_Rate = mean(sign(predicted_score) == sign(realized_return))
+Hit_Rate = mean(sign(predicted_return) == sign(actual_return))
 ```
 
 ### 6.3 Portfolio Performance Metrics
@@ -200,7 +204,7 @@ Hit_Rate = mean(sign(predicted_score) == sign(realized_return))
 
 ### 7.1 Top-K Equal Weight
 
-Select top-K assets by predicted score. Assign equal weight `1/K` to each.
+Select top-K assets by `predicted_return`. Assign equal weight `1/K` to each.
 
 ```
 w_i = 1/K  if rank(score_i) <= K  else  0
@@ -208,7 +212,7 @@ w_i = 1/K  if rank(score_i) <= K  else  0
 
 ### 7.2 Score-Proportional
 
-Normalize positive scores to sum to 1:
+Normalize positive `predicted_return` values to sum to 1:
 
 ```
 w_i = max(score_i, 0) / sum(max(score_j, 0) for j in universe)

@@ -24,142 +24,1449 @@ paths:
   mlruns: "mlruns"
 
 universe:
-  top_n: 100
-  rebalance_frequency: "monthly"
-  min_history_days: 90
-  min_daily_volume_usd: 1_000_000
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  provider_priority:
+    - coingecko
+    - coinpaprika
+    - coincap
+    - cryptocompare
+  candidate_n: 500
+  final_universe_n: 100
+  minimum_eligible_n: 50
+  snapshot_frequency: monthly
+  snapshot_day: 1
+  start_date: "2021-01-01"
+  end_date: null
+  vs_currency: usd
   exclude_stablecoins: true
   exclude_wrapped: true
-  exclude_synthetic: true
-  stablecoin_keywords:
-    - "usd"
-    - "usdt"
-    - "usdc"
-    - "dai"
-    - "busd"
-    - "tusd"
-    - "frax"
-    - "lusd"
-    - "susd"
-    - "eur"
-    - "gbp"
-    - "stablecoin"
-  wrapped_keywords:
-    - "wrapped"
-    - "wbtc"
-    - "weth"
-    - "renbtc"
-    - "hbtc"
+  exclude_bridged: true
+  exclude_lst: true
+  exclude_synthetic_pegged: true
+  require_365d_maturity: true
+  require_exchange_tradability: true
+  exchange_tradability_sources:
+    - coinbase
+    - kraken
+  require_onchain_coverage: true
+  onchain_coverage_sources:
+    - coinmetrics
+    - defillama
+  cache_enabled: true
+  force_refresh: false
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 2.0
+  max_retries: 5
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  fail_on_empty_month: true
+  fail_on_low_eligible_count: true
+  fail_on_demo_data: true
+  fail_on_provider_exhaustion: true
+  output_dir: "data/raw/universe"
+  cache_dir: "data/cache"
+  require_true_historical_rankings: false
+  allow_current_ranking_for_recent_snapshot_only: true
+  allow_latest_snapshot_only: true
+  # Backward-compatible aliases for older code paths.
+  top_n: 100
+  rebalance_frequency: "monthly"
+  min_history_days: 365
+  min_daily_volume_usd: 1_000_000
+
+universe_dev:
+  research_mode: true
+  live_api_enabled: false
+  use_fixtures: true
+  candidate_n: 25
+  final_universe_n: 10
+  minimum_eligible_n: 5
+  cache_enabled: true
+  cache_dir: "data/cache/universe_dev"
+  force_refresh: false
+  start_date: "2024-01-01"
+  end_date: "2024-01-01"
 
 market_data:
-  exchange: "binance"
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: null
+  exchange_priority:
+    - coinbase
+    - kraken
+    - kucoin
+    - gemini
+  fallback_provider_priority:
+    - cryptocompare
+    - coingecko
+    - coincap
+    - coinpaprika
+  quote_currency: "USD"
+  allow_usdt_fallback: false
   timeframe: "1d"
-  quote_currency: "USDT"
+  backfill_days: 2000
+  min_history_days: 365
+  minimum_assets_required: 50
+  maximum_failed_assets_allowed: 50
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/market"
+  request_timeout_seconds: 30
+  per_asset_timeout_seconds: 180
+  max_pages_per_asset: 20
+  max_rows_per_asset: 3000
+  min_seconds_between_requests: 1.5
+  max_retries: 5
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  drop_incomplete_current_day: true
+  forward_fill_missing_days: true
+  set_filled_volume_to_zero: true
+  log_each_asset: true
+  log_each_provider_attempt: true
+  fail_on_low_coverage: true
+  fail_on_empty_output: true
+  fail_on_binance_usage: true
+  fail_on_demo_data: true
+
+market_data_smoke:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 3
+  exchange_priority:
+    - coinbase
+    - kraken
+    - kucoin
+    - gemini
+  fallback_provider_priority:
+    - cryptocompare
+    - coingecko
+    - coincap
+    - coinpaprika
+  quote_currency: "USD"
+  allow_usdt_fallback: false
+  timeframe: "1d"
+  backfill_days: 60
+  min_history_days: 30
+  minimum_assets_required: 1
+  maximum_failed_assets_allowed: 3
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/market"
+  request_timeout_seconds: 20
+  per_asset_timeout_seconds: 90
+  max_pages_per_asset: 10
+  max_rows_per_asset: 2500
+  min_seconds_between_requests: 1.5
+  max_retries: 3
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  drop_incomplete_current_day: true
+  forward_fill_missing_days: true
+  set_filled_volume_to_zero: true
+  log_each_asset: true
+  log_each_provider_attempt: true
+  fail_on_low_coverage: true
+  fail_on_empty_output: true
+  fail_on_binance_usage: true
+  fail_on_demo_data: true
+market_data_10x365:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 10
+  exchange_priority:
+    - coinbase
+    - kraken
+    - kucoin
+    - gemini
+  fallback_provider_priority:
+    - cryptocompare
+    - coingecko
+    - coincap
+    - coinpaprika
+  quote_currency: "USD"
+  allow_usdt_fallback: false
+  timeframe: "1d"
+  backfill_days: 365
+  min_history_days: 180
+  minimum_assets_required: 5
+  maximum_failed_assets_allowed: 5
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/market"
+  request_timeout_seconds: 30
+  per_asset_timeout_seconds: 120
+  max_pages_per_asset: 10
+  max_rows_per_asset: 1000
+  min_seconds_between_requests: 1.5
+  max_retries: 3
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  drop_incomplete_current_day: true
+  forward_fill_missing_days: true
+  set_filled_volume_to_zero: true
+  log_each_asset: true
+  log_each_provider_attempt: true
+  fail_on_low_coverage: true
+  fail_on_empty_output: true
+  fail_on_binance_usage: true
+  fail_on_demo_data: true
+
+market_data_25x730:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 25
+  exchange_priority:
+    - coinbase
+    - kraken
+    - kucoin
+    - gemini
+  fallback_provider_priority:
+    - cryptocompare
+    - coingecko
+    - coincap
+    - coinpaprika
+  quote_currency: "USD"
+  allow_usdt_fallback: false
+  timeframe: "1d"
   backfill_days: 730
-  retry_attempts: 5
-  retry_backoff_base: 2.0
-  rate_limit_sleep: 1.0
-  benchmarks:
-    - "BTC"
-    - "ETH"
+  min_history_days: 365
+  minimum_assets_required: 15
+  maximum_failed_assets_allowed: 10
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/market"
+  request_timeout_seconds: 30
+  per_asset_timeout_seconds: 180
+  max_pages_per_asset: 15
+  max_rows_per_asset: 1500
+  min_seconds_between_requests: 1.5
+  max_retries: 4
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  drop_incomplete_current_day: true
+  forward_fill_missing_days: true
+  set_filled_volume_to_zero: true
+  log_each_asset: true
+  log_each_provider_attempt: true
+  fail_on_low_coverage: true
+  fail_on_empty_output: true
+  fail_on_binance_usage: true
+  fail_on_demo_data: true
+
+market_data_50x1000:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 50
+  exchange_priority:
+    - coinbase
+    - kraken
+    - kucoin
+    - gemini
+  fallback_provider_priority:
+    - cryptocompare
+    - coingecko
+    - coincap
+    - coinpaprika
+  quote_currency: "USD"
+  allow_usdt_fallback: false
+  timeframe: "1d"
+  backfill_days: 1000
+  min_history_days: 365
+  minimum_assets_required: 30
+  maximum_failed_assets_allowed: 20
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/market"
+  request_timeout_seconds: 30
+  per_asset_timeout_seconds: 240
+  max_pages_per_asset: 20
+  max_rows_per_asset: 2500
+  min_seconds_between_requests: 1.5
+  max_retries: 4
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  drop_incomplete_current_day: true
+  forward_fill_missing_days: true
+  set_filled_volume_to_zero: true
+  log_each_asset: true
+  log_each_provider_attempt: true
+  fail_on_low_coverage: true
+  fail_on_empty_output: true
+  fail_on_binance_usage: true
+  fail_on_demo_data: true
+market_data_75x1500:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 75
+  exchange_priority:
+    - coinbase
+    - kraken
+    - kucoin
+    - gemini
+  fallback_provider_priority:
+    - cryptocompare
+    - coingecko
+    - coincap
+    - coinpaprika
+  quote_currency: "USD"
+  allow_usdt_fallback: false
+  timeframe: "1d"
+  backfill_days: 1500
+  min_history_days: 365
+  minimum_assets_required: 45
+  maximum_failed_assets_allowed: 30
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/market"
+  request_timeout_seconds: 30
+  per_asset_timeout_seconds: 240
+  max_pages_per_asset: 25
+  max_rows_per_asset: 3000
+  min_seconds_between_requests: 1.5
+  max_retries: 4
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  drop_incomplete_current_day: true
+  forward_fill_missing_days: true
+  set_filled_volume_to_zero: true
+  log_each_asset: true
+  log_each_provider_attempt: true
+  fail_on_low_coverage: true
+  fail_on_empty_output: true
+  fail_on_binance_usage: true
+  fail_on_demo_data: true
+
+market_data_dev:
+  research_mode: true
+  live_api_enabled: false
+  use_fixtures: true
+  max_assets: 3
+  backfill_days: 60
+  min_history_days: 30
+  minimum_assets_required: 2
+  cache_enabled: true
+  force_refresh: false
+
+universe_cmc_3y:
+  research_mode: true
+  provider_priority:
+    - coinmarketcap
+  use_cmc_historical_listings: true
+  historical_universe_mode: true
+  lookback_days: 1095
+  snapshot_frequency: "MS"
+  candidate_n: 300
+  final_universe_n: 100
+  minimum_eligible_n: 50
+  include_inactive: true
+  convert: "USD"
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/cmc"
+  fail_on_survivor_only_universe: true
+  fail_on_empty_month: true
+  fail_on_missing_cmc_id: true
+
+market_data_cmc_3y:
+  research_mode: true
+  primary_provider: "coinmarketcap"
+  use_cmc_ohlcv: true
+  lookback_days: 1095
+  timeframe: "1d"
+  interval: "daily"
+  convert: "USD"
+  minimum_assets_required: 50
+  maximum_failed_assets_allowed: 100
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/cmc"
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_missing_cmc_id: true
+  drop_incomplete_current_day: true
+  fallback_to_free_providers: true
+
+onchain_smoke:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 5
+  backfill_days: 365
+  min_history_days: 90
+  minimum_assets_with_any_onchain: 2
+  minimum_total_metric_observations: 100
+  minimum_assets_with_defillama: 1
+  minimum_defillama_observations: 30
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain"
+  output_dir: "data/raw/onchain"
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 1.0
+  max_retries: 3
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  per_asset_timeout_seconds: 90
+  drop_incomplete_current_day: true
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_demo_data: true
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
+  coinmetrics:
+    enabled: true
+    required: false
+    base_url: "https://community-api.coinmetrics.io/v4"
+    rate_limit_requests: 10
+    rate_limit_seconds: 6
+    metrics:
+      - AdrActCnt
+      - TxCnt
+      - CapRealUSD
+      - CapMVRVCur
+      - NVTAdj
+      - FeeTotUSD
+      - TxTfrValAdjUSD
+      - SplyCur
+      - CapMrktCurUSD
+      - IssTotUSD
+  defillama:
+    enabled: true
+    required: false
+    base_url: "https://api.llama.fi"
+    metrics:
+      - chain_tvl_usd
+      - protocol_tvl_usd
+      - fees_usd
+      - revenue_usd
+      - dex_volume_usd
+      - stablecoin_mcap_usd
+      - pool_tvl_usd
+      - pool_apy
+  etherscan:
+    enabled: true
+    required: false
+    env_key: "ETHERSCAN_API_KEY"
+    base_url: "https://api.etherscan.io/v2/api"
+    only_if_key_present: true
+    rate_limit_per_second: 3
+    chains:
+      ETH:
+        chainid: 1
+        chain_name: "Ethereum"
+      BNB:
+        chainid: 56
+        chain_name: "BNB Smart Chain"
+      AVAX:
+        chainid: 43114
+        chain_name: "Avalanche C-Chain"
+      MNT:
+        chainid: 5000
+        chain_name: "Mantle"
+    metrics:
+      - gas_used
+      - transaction_count_proxy
+      - token_transfer_count_proxy
+  thegraph:
+    enabled: true
+    required: false
+    env_key: "GRAPH_API_KEY"
+    only_if_key_present: true
+    rate_limit_per_minute: 200
+    configured_subgraphs: {}
+    metrics:
+      - protocol_volume_usd
+      - protocol_tvl_usd
+      - protocol_fees_usd
+  blockchair:
+    enabled: false
+    required: false
+    base_url: "https://api.blockchair.com"
+    chains: {}
+    metrics:
+      - chain_transaction_count
+      - chain_output_volume
+      - chain_fee_total
+  dune:
+    enabled: false
+    required: false
+    env_key: "DUNE_API_KEY"
+    only_if_key_present: true
+    query_ids: {}
+    metrics:
+      - curated_protocol_metric
+
+onchain:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: null
+  backfill_days: 2000
+  min_history_days: 365
+  minimum_assets_with_any_onchain: 15
+  minimum_total_metric_observations: 30000
+  minimum_assets_with_defillama: 5
+  minimum_defillama_observations: 500
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain"
+  output_dir: "data/raw/onchain"
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 1.0
+  max_retries: 4
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  per_asset_timeout_seconds: 180
+  drop_incomplete_current_day: true
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_demo_data: true
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
+  coinmetrics:
+    enabled: true
+    required: false
+    base_url: "https://community-api.coinmetrics.io/v4"
+    rate_limit_requests: 10
+    rate_limit_seconds: 6
+    metrics:
+      - AdrActCnt
+      - TxCnt
+      - CapRealUSD
+      - CapMVRVCur
+      - NVTAdj
+      - FeeTotUSD
+      - TxTfrValAdjUSD
+      - SplyCur
+      - CapMrktCurUSD
+      - IssTotUSD
+  defillama:
+    enabled: true
+    required: false
+    base_url: "https://api.llama.fi"
+    metrics:
+      - chain_tvl_usd
+      - protocol_tvl_usd
+      - fees_usd
+      - revenue_usd
+      - dex_volume_usd
+      - stablecoin_mcap_usd
+      - pool_tvl_usd
+      - pool_apy
+  etherscan:
+    enabled: true
+    required: false
+    env_key: "ETHERSCAN_API_KEY"
+    base_url: "https://api.etherscan.io/v2/api"
+    only_if_key_present: true
+    rate_limit_per_second: 3
+    chains:
+      ETH:
+        chainid: 1
+        chain_name: "Ethereum"
+      BNB:
+        chainid: 56
+        chain_name: "BNB Smart Chain"
+      AVAX:
+        chainid: 43114
+        chain_name: "Avalanche C-Chain"
+      MNT:
+        chainid: 5000
+        chain_name: "Mantle"
+    metrics:
+      - gas_used
+      - transaction_count_proxy
+      - token_transfer_count_proxy
+  thegraph:
+    enabled: true
+    required: false
+    env_key: "GRAPH_API_KEY"
+    only_if_key_present: true
+    rate_limit_per_minute: 200
+    configured_subgraphs: {}
+    metrics:
+      - protocol_volume_usd
+      - protocol_tvl_usd
+      - protocol_fees_usd
+  blockchair:
+    enabled: false
+    required: false
+    base_url: "https://api.blockchair.com"
+    chains: {}
+    metrics:
+      - chain_transaction_count
+      - chain_output_volume
+      - chain_fee_total
+  dune:
+    enabled: false
+    required: false
+    env_key: "DUNE_API_KEY"
+    only_if_key_present: true
+    query_ids: {}
+    metrics:
+      - curated_protocol_metric
+
+onchain_dev:
+  research_mode: true
+  live_api_enabled: false
+  use_fixtures: true
+  max_assets: 3
+  backfill_days: 60
+  min_history_days: 30
+  minimum_assets_with_any_onchain: 2
+  minimum_total_metric_observations: 20
+  minimum_assets_with_defillama: 1
+  minimum_defillama_observations: 5
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain_dev"
+  output_dir: "data/raw/onchain_dev"
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
 
 on_chain:
-  coinmetrics_base_url: "https://community-api.coinmetrics.io/v4"
-  defillama_base_url: "https://api.llama.fi"
-  metrics:
-    - "AdrActCnt"       # Active addresses
-    - "TxCnt"           # Transaction count
-    - "CapRealUSD"      # Realized cap
-    - "CapMVRVCur"      # MVRV ratio
-    - "NVTAdj"          # NVT adjusted
-    - "FeeTotUSD"       # Total fees
-    - "IssTotUSD"       # Issuance
-  graceful_fallback: true
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: null
+  backfill_days: 2000
+  min_history_days: 365
+  minimum_assets_with_any_onchain: 15
+  minimum_total_metric_observations: 30000
+  minimum_assets_with_defillama: 5
+  minimum_defillama_observations: 500
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain"
+  output_dir: "data/raw/onchain"
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 1.0
+  max_retries: 4
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  per_asset_timeout_seconds: 180
+  drop_incomplete_current_day: true
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_demo_data: true
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
+  coinmetrics:
+    enabled: true
+    required: false
+    base_url: "https://community-api.coinmetrics.io/v4"
+    rate_limit_requests: 10
+    rate_limit_seconds: 6
+    metrics:
+      - AdrActCnt
+      - TxCnt
+      - CapRealUSD
+      - CapMVRVCur
+      - NVTAdj
+      - FeeTotUSD
+      - TxTfrValAdjUSD
+      - SplyCur
+      - CapMrktCurUSD
+      - IssTotUSD
+  defillama:
+    enabled: true
+    required: false
+    base_url: "https://api.llama.fi"
+    metrics:
+      - chain_tvl_usd
+      - protocol_tvl_usd
+      - fees_usd
+      - revenue_usd
+      - dex_volume_usd
+      - stablecoin_mcap_usd
+      - pool_tvl_usd
+      - pool_apy
+  etherscan:
+    enabled: true
+    required: false
+    env_key: "ETHERSCAN_API_KEY"
+    base_url: "https://api.etherscan.io/v2/api"
+    only_if_key_present: true
+    rate_limit_per_second: 3
+    chains:
+      ETH:
+        chainid: 1
+        chain_name: "Ethereum"
+      BNB:
+        chainid: 56
+        chain_name: "BNB Smart Chain"
+      AVAX:
+        chainid: 43114
+        chain_name: "Avalanche C-Chain"
+      MNT:
+        chainid: 5000
+        chain_name: "Mantle"
+    metrics:
+      - gas_used
+      - transaction_count_proxy
+      - token_transfer_count_proxy
+  thegraph:
+    enabled: true
+    required: false
+    env_key: "GRAPH_API_KEY"
+    only_if_key_present: true
+    rate_limit_per_minute: 200
+    configured_subgraphs: {}
+    metrics:
+      - protocol_volume_usd
+      - protocol_tvl_usd
+      - protocol_fees_usd
+  blockchair:
+    enabled: false
+    required: false
+    base_url: "https://api.blockchair.com"
+    chains: {}
+    metrics:
+      - chain_transaction_count
+      - chain_output_volume
+      - chain_fee_total
+  dune:
+    enabled: false
+    required: false
+    env_key: "DUNE_API_KEY"
+    only_if_key_present: true
+    query_ids: {}
+    metrics:
+      - curated_protocol_metric
+onchain_10x365:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 10
+  backfill_days: 365
+  min_history_days: 90
+  minimum_assets_with_any_onchain: 6
+  minimum_total_metric_observations: 8000
+  minimum_assets_with_defillama: 2
+  minimum_defillama_observations: 100
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain"
+  output_dir: "data/raw/onchain"
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 1.0
+  max_retries: 3
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  per_asset_timeout_seconds: 120
+  drop_incomplete_current_day: true
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_demo_data: true
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
+
+onchain_25x730:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 25
+  backfill_days: 730
+  min_history_days: 180
+  minimum_assets_with_any_onchain: 8
+  minimum_assets_with_defillama: 3
+  minimum_total_metric_observations: 15000
+  minimum_defillama_observations: 300
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain"
+  output_dir: "data/raw/onchain"
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 1.0
+  max_retries: 3
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  per_asset_timeout_seconds: 150
+  drop_incomplete_current_day: true
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_demo_data: true
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
+
+onchain_50x1000:
+  research_mode: true
+  live_api_enabled: true
+  use_fixtures: false
+  max_assets: 50
+  backfill_days: 1000
+  min_history_days: 365
+  minimum_assets_with_any_onchain: 12
+  minimum_assets_with_defillama: 5
+  minimum_total_metric_observations: 25000
+  minimum_defillama_observations: 500
+  cache_enabled: true
+  force_refresh: false
+  cache_dir: "data/cache/onchain"
+  output_dir: "data/raw/onchain"
+  request_timeout_seconds: 30
+  min_seconds_between_requests: 1.0
+  max_retries: 4
+  backoff_base_seconds: 3
+  backoff_jitter_seconds: 1.5
+  per_asset_timeout_seconds: 180
+  drop_incomplete_current_day: true
+  fail_on_empty_output: true
+  fail_on_low_coverage: true
+  fail_on_demo_data: true
+  provider_priority:
+    - coinmetrics
+    - defillama
+    - etherscan
+    - thegraph
+    - blockchair
+    - dune
 
 features:
-  return_windows: [3, 7, 14, 30, 90]
-  volatility_window: 30
-  beta_window: 60
-  skewness_window: 30
-  volume_windows: [7, 14, 30]
-  winsorize_lower: 0.01
-  winsorize_upper: 0.99
-  zscore_cross_sectional: true
-  correlation_threshold: 0.85
-  vif_threshold: 10.0
-  feature_version: "v1"
+  research_mode: true
+  input_market_path: "data/raw/market/market_ohlcv.parquet"
+  input_onchain_wide_path: "data/raw/onchain/onchain_wide.parquet"
+  input_onchain_observations_path: "data/raw/onchain/onchain_observations.parquet"
+  input_universe_path: "data/raw/universe/universe_monthly.parquet"
+  input_market_manifest_path: "data/raw/market/market_manifest.json"
+  input_onchain_manifest_path: "data/raw/onchain/onchain_manifest.json"
+  output_dir: "data/features"
+  use_duckdb: true
+  fail_on_missing_inputs: true
+  fail_on_empty_output: true
+  fail_on_duplicate_symbol_date: true
+  fail_on_target_leakage: true
+  fail_on_future_leakage: true
+  fail_on_all_null_feature: true
+  fail_on_low_feature_coverage: true
+  min_market_symbols_required: 90
+  min_onchain_symbols_required: 40
+  min_full_feature_symbols_required: 90
+  min_rows_required: 50000
+  market_windows:
+    returns: [1, 3, 7, 14, 30, 60, 90]
+    volatility: [7, 14, 30, 60]
+    volume: [7, 14, 30, 60]
+    skewness: [30]
+    beta: [60]
+    atr: [14]
+    drawdown: [30, 90]
+  onchain_windows:
+    growth: [7, 14, 30, 90]
+    smoothing: [30, 90]
+    zscore: [30, 90]
+  onchain_lag_days: 1
+  market_feature_policy: "completed_daily_candle"
+  onchain_feature_policy: "lagged_asof"
+  winsorization:
+    enabled: true
+    method: "cross_sectional_by_date"
+    lower_quantile: 0.01
+    upper_quantile: 0.99
+  cross_sectional_zscore:
+    enabled: true
+    group_by: "date_ts"
+    min_assets_per_date: 10
+  missingness:
+    add_missing_indicators: true
+    add_onchain_coverage_flags: true
+    max_null_pct_feature: 0.95
+  pruning:
+    enabled: true
+    correlation_method: "spearman"
+    correlation_threshold: 0.85
+    vif_enabled: true
+    vif_threshold: 10.0
+    max_final_features: 60
+    min_final_features: 20
+    keep_unpruned_outputs: true
+  feature_versions:
+    market: "market_v1"
+    onchain: "onchain_v1"
+    full: "full_v1"
+
+features_smoke:
+  research_mode: true
+  output_dir: "data/features_smoke"
+  max_symbols: 10
+  min_market_symbols_required: 5
+  min_onchain_symbols_required: 2
+  min_full_feature_symbols_required: 5
+  min_rows_required: 1000
+  use_duckdb: true
+  fail_on_missing_inputs: true
+  fail_on_empty_output: true
+  onchain_lag_days: 1
+
+features_25:
+  research_mode: true
+  output_dir: "data/features"
+  max_symbols: 25
+  min_market_symbols_required: 20
+  min_onchain_symbols_required: 10
+  min_full_feature_symbols_required: 20
+  min_rows_required: 10000
+  use_duckdb: true
+  onchain_lag_days: 1
 
 labels:
-  horizons:
-    - 7    # 1 week
-    - 14   # 2 weeks
-    - 30   # 1 month
-  label_type: "log_return"
-  drop_incomplete: true
+  research_mode: true
+  input_market_path: "data/raw/market/market_ohlcv.parquet"
+  input_features_path: "data/features/full_features.parquet"
+  input_pruned_features_path: "data/features/full_features_pruned.parquet"
+  input_market_manifest_path: "data/raw/market/market_manifest.json"
+  input_feature_manifest_path: "data/features/feature_manifest.json"
+  output_dir: "data/labels"
+  horizons: [7, 14, 30]
+  label_type: "forward_log_return"
+  use_pruned_features_for_modeling_dataset: true
+  also_write_unpruned_modeling_dataset: true
+  drop_incomplete_horizon_rows: true
+  fail_on_missing_inputs: true
+  fail_on_empty_output: true
+  fail_on_duplicate_symbol_date: true
+  fail_on_non_positive_prices: true
+  fail_on_null_labels: true
+  fail_on_infinite_labels: true
+  fail_on_target_leakage: true
+  fail_on_feature_label_misalignment: true
+  fail_on_low_label_coverage: true
+  min_symbols_required: 90
+  min_label_rows_required: 50000
+  min_rows_per_horizon_required: 50000
+  min_common_rows_all_horizons: 50000
+  include_cross_sectional_ranks: true
+  rank_method: "average"
+  rank_pct: true
+  add_binary_direction_labels: true
+  add_quantile_bucket_labels: true
+  quantile_buckets: 5
+  max_horizon_days: 30
+  recommended_embargo_days: 30
+  purge_train_test_overlap_days: 30
+  output_partitioned: true
+
+labels_smoke:
+  research_mode: true
+  output_dir: "data/labels_smoke"
+  max_symbols: 10
+  horizons: [7, 14, 30]
+  min_symbols_required: 5
+  min_label_rows_required: 1000
+  min_rows_per_horizon_required: 1000
+  min_common_rows_all_horizons: 1000
+  drop_incomplete_horizon_rows: true
+  fail_on_missing_inputs: true
+  fail_on_empty_output: true
+  fail_on_null_labels: true
+  fail_on_infinite_labels: true
+
+labels_25:
+  research_mode: true
+  output_dir: "data/labels"
+  max_symbols: 25
+  horizons: [7, 14, 30]
+  min_symbols_required: 20
+  min_label_rows_required: 10000
+  min_rows_per_horizon_required: 10000
+  min_common_rows_all_horizons: 10000
+  drop_incomplete_horizon_rows: true
 
 modeling:
-  models:
-    - "random_forest"
-    - "lightgbm"
-  default_horizon: 7
+  research_mode: true
+  input_path: "data/labels/modeling_dataset.parquet"
+  horizons: [7, 14, 30]
+  model_names:
+    - baseline_cross_sectional_mean
+  feature_sets:
+    - market_only
+    - market_plus_onchain
+  default_feature_set: "market_plus_onchain"
+  default_model: "lightgbm"
+  use_pruned_features: true
+  fail_on_empty_output: true
+  fail_on_no_valid_folds: true
+  fail_on_leakage: true
+  min_prediction_rows: 1000
+  min_test_symbols_per_date: 10
+  random_seed: 42
   walk_forward:
-    initial_train_months: 12
-    step_months: 1
-    embargo_days: 7
-  hyperparameter_tuning: false
-  n_optuna_trials: 30
-  cv_metric: "rank_ic"
+    initial_train_days: 504
+    test_days: 30
+    step_days: 30
+    purge_days: null
+    embargo_days: 30
+    min_train_rows: 1000
+    min_test_rows: 100
+    min_test_symbols: 10
   random_forest:
-    n_estimators: 200
-    max_depth: 6
+    n_estimators: 60
+    max_depth: 5
     min_samples_leaf: 20
+    max_features: 0.5
     n_jobs: -1
   lightgbm:
-    n_estimators: 300
-    learning_rate: 0.05
-    max_depth: 6
+    n_estimators: 120
+    learning_rate: 0.03
+    max_depth: 5
     num_leaves: 31
-    min_child_samples: 20
+    min_child_samples: 30
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    objective: "regression"
     n_jobs: -1
     verbose: -1
 
+modeling_smoke:
+  research_mode: true
+  max_symbols: 10
+  horizons: [7]
+  model_names:
+    - baseline_cross_sectional_mean
+    - random_forest
+  feature_sets:
+    - market_only
+    - market_plus_onchain
+  walk_forward:
+    initial_train_days: 180
+    test_days: 30
+    step_days: 30
+    purge_days: null
+    embargo_days: 30
+    min_train_rows: 200
+    min_test_rows: 20
+    min_test_symbols: 3
+  random_forest:
+    n_estimators: 75
+    max_depth: 5
+    min_samples_leaf: 20
+    max_features: 0.5
+    n_jobs: -1
+
 portfolio:
-  strategies:
-    - "top_k_equal_weight"
-    - "score_proportional"
-  default_strategy: "top_k_equal_weight"
+  research_mode: true
+  prediction_path: "data/predictions/model_predictions.parquet"
+  leaderboard_path: "data/predictions/model_leaderboard.parquet"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/allocations"
+  model_selection: "best_available"
+  fallback_model: "baseline_cross_sectional_mean"
+  fallback_feature_set: "market_only"
+  horizon_days: 14
+  rebalance_frequency: "W"
+  execution_lag_days: 1
+  strategy_names:
+    - top_k_equal_weight
+    - top_k_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
   top_k_values: [5, 10, 20]
-  default_top_k: 10
-  max_weight: 0.10
-  rebalance_frequency: "weekly"
+  max_weight: 0.15
+  min_weight: 0.0
+  target_gross_exposure: 1.0
+  target_net_exposure: 1.0
+  allow_short: false
   long_only: true
-  positive_signal_filter: true
-  transaction_cost_bps: 20
+  volatility_lookback_days: 30
+  min_assets_per_rebalance: 5
+  max_assets_per_rebalance: 25
+  min_prediction_count_per_date: 5
+  turnover_buffer: 0.02
+  max_turnover_per_rebalance: 0.50
+  min_signal_zscore: 0.0
+  fail_on_empty_allocations: true
+  fail_on_weight_sum_error: true
+  fail_on_lookahead: true
+
+portfolio_smoke:
+  research_mode: true
+  prediction_path: "data/predictions/model_predictions.parquet"
+  leaderboard_path: "data/predictions/model_leaderboard.parquet"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/allocations_smoke"
+  model_selection: "best_available"
+  max_symbols: 10
+  horizon_days: 14
+  rebalance_frequency: "W"
+  execution_lag_days: 1
+  strategy_names:
+    - top_k_equal_weight
+    - top_k_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  top_k_values: [5, 10]
+  max_weight: 0.20
+  min_weight: 0.0
+  target_gross_exposure: 1.0
+  target_net_exposure: 1.0
+  allow_short: false
+  long_only: true
+  volatility_lookback_days: 30
+  min_assets_per_rebalance: 3
+  max_assets_per_rebalance: 20
+  turnover_buffer: 0.02
+  max_turnover_per_rebalance: 0.50
+  min_signal_zscore: 0.0
+  fail_on_empty_allocations: true
+  fail_on_weight_sum_error: true
+  fail_on_lookahead: true
+
+portfolio_alpha_candidates:
+  research_mode: true
+  prediction_path: "data/predictions/candidate_model_predictions.parquet"
+  leaderboard_path: "data/predictions/candidate_model_leaderboard.parquet"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/allocations_alpha_candidates"
+  model_selection: "best_available"
+  horizon_days: 14
+  rebalance_frequency: "W"
+  execution_lag_days: 1
+  strategy_names:
+    - top_k_equal_weight
+    - top_k_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  top_k_values: [5, 10, 20]
+  max_weight: 0.15
+  min_weight: 0.0
+  target_gross_exposure: 1.0
+  target_net_exposure: 1.0
+  allow_short: false
+  long_only: true
+  volatility_lookback_days: 30
+  min_assets_per_rebalance: 5
+  max_assets_per_rebalance: 25
+  min_prediction_count_per_date: 5
+  turnover_buffer: 0.02
+  max_turnover_per_rebalance: 0.50
+  min_signal_zscore: 0.0
+  fail_on_empty_allocations: true
+  fail_on_weight_sum_error: true
+  fail_on_lookahead: true
+
+portfolio_candidate_lightgbm_14d:
+  research_mode: true
+  prediction_path: "data/predictions/candidates_by_signal/lightgbm_market_only_raw_forward_return_14d_predictions.parquet"
+  leaderboard_path: "data/predictions/candidates_by_signal/lightgbm_market_only_raw_forward_return_14d_leaderboard.parquet"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/allocations_candidate_lightgbm_14d"
+  model_selection: "best_available"
+  horizon_days: 14
+  rebalance_frequency: "W"
+  execution_lag_days: 1
+  strategy_names:
+    - top_k_equal_weight
+    - top_k_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  top_k_values: [5, 10, 20]
+  max_weight: 0.15
+  min_weight: 0.0
+  target_gross_exposure: 1.0
+  target_net_exposure: 1.0
+  allow_short: false
+  long_only: true
+  volatility_lookback_days: 30
+  min_assets_per_rebalance: 5
+  max_assets_per_rebalance: 25
+  min_prediction_count_per_date: 5
+  turnover_buffer: 0.02
+  max_turnover_per_rebalance: 0.50
+  min_signal_zscore: 0.0
+  fail_on_empty_allocations: true
+  fail_on_weight_sum_error: true
+  fail_on_lookahead: true
+
+portfolio_candidate_linear_ridge_30d:
+  research_mode: true
+  prediction_path: "data/predictions/candidates_by_signal/linear_ridge_market_only_raw_forward_return_30d_predictions.parquet"
+  leaderboard_path: "data/predictions/candidates_by_signal/linear_ridge_market_only_raw_forward_return_30d_leaderboard.parquet"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/allocations_candidate_linear_ridge_30d"
+  model_selection: "best_available"
+  horizon_days: 30
+  rebalance_frequency: "W"
+  execution_lag_days: 1
+  strategy_names:
+    - top_k_equal_weight
+    - top_k_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  top_k_values: [5, 10, 20]
+  max_weight: 0.15
+  min_weight: 0.0
+  target_gross_exposure: 1.0
+  target_net_exposure: 1.0
+  allow_short: false
+  long_only: true
+  volatility_lookback_days: 30
+  min_assets_per_rebalance: 5
+  max_assets_per_rebalance: 25
+  min_prediction_count_per_date: 5
+  turnover_buffer: 0.02
+  max_turnover_per_rebalance: 0.50
+  min_signal_zscore: 0.0
+  fail_on_empty_allocations: true
+  fail_on_weight_sum_error: true
+  fail_on_lookahead: true
+
+portfolio_candidate_random_forest_14d:
+  research_mode: true
+  prediction_path: "data/predictions/candidates_by_signal/random_forest_market_only_raw_forward_return_14d_predictions.parquet"
+  leaderboard_path: "data/predictions/candidates_by_signal/random_forest_market_only_raw_forward_return_14d_leaderboard.parquet"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/allocations_candidate_random_forest_14d"
+  model_selection: "best_available"
+  horizon_days: 14
+  rebalance_frequency: "W"
+  execution_lag_days: 1
+  strategy_names:
+    - top_k_equal_weight
+    - top_k_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  top_k_values: [5, 10, 20]
+  max_weight: 0.15
+  min_weight: 0.0
+  target_gross_exposure: 1.0
+  target_net_exposure: 1.0
+  allow_short: false
+  long_only: true
+  volatility_lookback_days: 30
+  min_assets_per_rebalance: 5
+  max_assets_per_rebalance: 25
+  min_prediction_count_per_date: 5
+  turnover_buffer: 0.02
+  max_turnover_per_rebalance: 0.50
+  min_signal_zscore: 0.0
+  fail_on_empty_allocations: true
+  fail_on_weight_sum_error: true
+  fail_on_lookahead: true
 
 backtesting:
-  initial_capital: 100_000
+  research_mode: true
+  allocation_path: "data/allocations/allocations_from_predictions.parquet"
+  allocation_manifest_path: "data/allocations/allocation_manifest.json"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/backtests"
+  initial_capital: 100000
   transaction_cost_bps: 20
-  cost_sweep_bps: [10, 20, 30, 50]
-  k_sweep: [5, 10, 20]
-  rebalance_frequencies: ["weekly", "biweekly", "monthly"]
-  benchmarks:
-    - "BTC"
-    - "ETH"
-    - "BTC_ETH_50_50"
-    - "top100_equal_weight"
-  subperiods:
-    - name: "bull_2021"
-      start: "2021-01-01"
-      end: "2021-11-01"
-    - name: "bear_2022"
-      start: "2022-01-01"
-      end: "2022-12-31"
-    - name: "recovery_2023"
-      start: "2023-01-01"
-      end: "2023-12-31"
-    - name: "bull_2024"
-      start: "2024-01-01"
-      end: "2024-12-31"
+  cost_sweep_bps: [0, 10, 20, 50, 100]
+  benchmark_rebalance_frequency: "M"
+  fail_on_empty_backtest: true
+  fail_on_missing_allocations: true
+  max_allowed_drawdown: -0.80
+
+backtesting_smoke:
+  research_mode: true
+  allocation_path: "data/allocations_smoke/allocations_from_predictions.parquet"
+  allocation_manifest_path: "data/allocations_smoke/allocation_manifest.json"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/backtests_smoke"
+  initial_capital: 100000
+  transaction_cost_bps: 20
+  cost_sweep_bps: [0, 10, 20, 50, 100]
+  benchmark_rebalance_frequency: "M"
+  fail_on_empty_backtest: true
+  fail_on_missing_allocations: true
+  max_allowed_drawdown: -0.80
+
+backtesting_alpha_candidates:
+  research_mode: true
+  allocation_path: "data/allocations_alpha_candidates/allocations_from_predictions.parquet"
+  allocation_manifest_path: "data/allocations_alpha_candidates/allocation_manifest.json"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/backtests_alpha_candidates"
+  initial_capital: 100000
+  transaction_cost_bps: 20
+  cost_sweep_bps: [0, 10, 20, 50, 100]
+  benchmark_rebalance_frequency: "M"
+  fail_on_empty_backtest: true
+  fail_on_missing_allocations: true
+  max_allowed_drawdown: -0.80
+
+backtesting_candidate_lightgbm_14d:
+  research_mode: true
+  allocation_path: "data/allocations_candidate_lightgbm_14d/allocations_from_predictions.parquet"
+  allocation_manifest_path: "data/allocations_candidate_lightgbm_14d/allocation_manifest.json"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/backtests_candidate_lightgbm_14d"
+  initial_capital: 100000
+  transaction_cost_bps: 20
+  cost_sweep_bps: [0, 10, 20, 50, 100]
+  benchmark_rebalance_frequency: "M"
+  fail_on_empty_backtest: true
+  fail_on_missing_allocations: true
+  max_allowed_drawdown: -0.80
+
+backtesting_candidate_linear_ridge_30d:
+  research_mode: true
+  allocation_path: "data/allocations_candidate_linear_ridge_30d/allocations_from_predictions.parquet"
+  allocation_manifest_path: "data/allocations_candidate_linear_ridge_30d/allocation_manifest.json"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/backtests_candidate_linear_ridge_30d"
+  initial_capital: 100000
+  transaction_cost_bps: 20
+  cost_sweep_bps: [0, 10, 20, 50, 100]
+  benchmark_rebalance_frequency: "M"
+  fail_on_empty_backtest: true
+  fail_on_missing_allocations: true
+  max_allowed_drawdown: -0.80
+
+backtesting_candidate_random_forest_14d:
+  research_mode: true
+  allocation_path: "data/allocations_candidate_random_forest_14d/allocations_from_predictions.parquet"
+  allocation_manifest_path: "data/allocations_candidate_random_forest_14d/allocation_manifest.json"
+  market_path: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/backtests_candidate_random_forest_14d"
+  initial_capital: 100000
+  transaction_cost_bps: 20
+  cost_sweep_bps: [0, 10, 20, 50, 100]
+  benchmark_rebalance_frequency: "M"
+  fail_on_empty_backtest: true
+  fail_on_missing_allocations: true
+  max_allowed_drawdown: -0.80
+
+alpha_research:
+  research_mode: true
+  output_dir: "data/research"
+  feature_path: "data/features/full_features.parquet"
+  label_path: "data/labels/label_matrix.parquet"
+  max_experiments: 80
+  feature_sets:
+    - market_only
+    - market_plus_onchain
+    - liquidity_momentum
+    - low_vol_momentum
+    - valuation_onchain
+  label_targets:
+    - raw_forward_return
+    - excess_vs_equal_weight
+    - excess_vs_btc
+    - volatility_adjusted_forward_return
+    - cross_sectional_forward_rank
+    - top_quantile_classification
+  horizons: [7, 14, 30]
+  models:
+    - baseline_cross_sectional_mean
+    - linear_ridge
+    - elastic_net
+    - random_forest
+    - lightgbm
+    - rule_momentum_14d
+    - rule_momentum_30d
+    - rule_vol_adjusted_momentum
+    - rule_reversal_3d
+    - rule_liquidity_momentum
+    - rule_onchain_growth
+    - rule_valuation_onchain
+    - rule_composite_market_onchain
+  train_days: 730
+  test_days: 90
+  step_days: 30
+  embargo_days: 30
+  min_train_rows: 1000
+  min_test_rows: 100
+  minimum_folds: 3
+  signal_only: true
+  export_candidate_to_predictions: false
+  allow_diagnostic_features: false
+  allow_baseline_candidate: false
+  max_model_features: 40
+  max_train_rows_per_fold: 8000
+  top_n_signals_to_backtest: 10
+  portfolio_strategies:
+    - top_10_equal_weight
+    - top_10_vol_scaled
+    - top_20_vol_scaled
+    - score_weighted_long_only
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  transaction_cost_bps: [0, 10, 20, 50, 100]
+  fail_on_empty_results: true
+
+alpha_research_smoke:
+  research_mode: true
+  output_dir: "data/research_smoke"
+  feature_path: "data/features/full_features.parquet"
+  label_path: "data/labels/label_matrix.parquet"
+  max_experiments: 20
+  feature_sets: ["market_only", "market_plus_onchain"]
+  label_targets: ["excess_vs_equal_weight", "cross_sectional_forward_rank"]
+  horizons: [7, 14]
+  models:
+    - baseline_cross_sectional_mean
+    - random_forest
+    - rule_momentum_30d
+    - rule_vol_adjusted_momentum
+  train_days: 730
+  test_days: 90
+  step_days: 30
+  embargo_days: 30
+  min_train_rows: 1000
+  min_test_rows: 100
+  minimum_folds: 3
+  signal_only: true
+  export_candidate_to_predictions: false
+  allow_diagnostic_features: false
+  allow_baseline_candidate: false
+  max_model_features: 60
+  max_train_rows_per_fold: 15000
+  top_n_signals_to_backtest: 5
+  portfolio_strategies:
+    - top_10_vol_scaled
+    - top_20_vol_scaled
+    - score_weighted_vol_scaled
+    - turnover_controlled
+  transaction_cost_bps: [10, 20, 50]
+  fail_on_empty_results: true
 
 mlflow:
   tracking_uri: "mlruns"

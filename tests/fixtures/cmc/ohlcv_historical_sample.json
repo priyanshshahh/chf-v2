@@ -1,0 +1,44 @@
+{
+  "status": {
+    "timestamp": "2026-04-30T00:00:00.000Z",
+    "error_code": 0,
+    "error_message": null
+  },
+  "data": {
+    "1": {
+      "id": 1,
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "quotes": [
+        {
+          "time_open": "2024-01-01T00:00:00.000Z",
+          "time_close": "2024-01-01T23:59:59.999Z",
+          "quote": {
+            "USD": {
+              "open": 42000.0,
+              "high": 43000.0,
+              "low": 41000.0,
+              "close": 42500.0,
+              "volume": 25000000000.0,
+              "market_cap": 830000000000.0
+            }
+          }
+        },
+        {
+          "time_open": "2024-01-02T00:00:00.000Z",
+          "time_close": "2024-01-02T23:59:59.999Z",
+          "quote": {
+            "USD": {
+              "open": 42500.0,
+              "high": 43500.0,
+              "low": 42000.0,
+              "close": 43200.0,
+              "volume": 24000000000.0,
+              "market_cap": 840000000000.0
+            }
+          }
+        }
+      ]
+    }
+  }
+}

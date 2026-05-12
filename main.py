@@ -32,9 +32,52 @@ PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def _get_cfg():
+def _merge_config_section(cfg, section: str | None):
+    if not section:
+        return cfg
+    if section not in cfg:
+        raise KeyError(f"Config section not found: {section}")
+    merged = dict(cfg)
+    if section.startswith("universe"):
+        base_key = "universe"
+    elif section.startswith("market_data"):
+        base_key = "market_data"
+    elif section.startswith("features"):
+        base_key = "features"
+    elif section.startswith("onchain"):
+        base_key = "onchain"
+    elif section.startswith("labels"):
+        base_key = "labels"
+    elif section.startswith("modeling"):
+        base_key = "modeling"
+    elif section.startswith("backtesting"):
+        base_key = "backtesting"
+    elif section.startswith("portfolio"):
+        base_key = "portfolio"
+    elif section.startswith("alpha_research"):
+        base_key = "alpha_research"
+    else:
+        base_key = section
+    base = dict(cfg.get(base_key, {}))
+    base.update(cfg.get(section, {}))
+    merged[base_key] = base
+    return merged
+
+
+def _get_cfg(args=None):
     from configs.config import load_config
-    return load_config()
+    cfg_path = Path(args.config) if args is not None and getattr(args, "config", None) else None
+    cfg = load_config(cfg_path)
+    section = getattr(args, "section", None) if args is not None else None
+    return _merge_config_section(cfg, section)
+
+
+def _command_cfg(args=None):
+    """Load config while remaining compatible with older monkeypatched tests."""
+    try:
+        return _get_cfg(args)
+    except TypeError:
+        return _get_cfg()
 
 
 def _feature_store_candidates(feat_dir: Path):
@@ -279,84 +322,165 @@ def generate_demo_artifacts(cfg):
 
 def cmd_universe(args):
     from agents.universe_agent import UniverseAgent
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = UniverseAgent(cfg)
-    agent.execute()
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[universe] ERROR: UniverseAgent failed.")
+        sys.exit(1)
     print(f"[universe] Done. Output: {agent.output_paths}")
 
 
 def cmd_market(args):
     from agents.market_data_agent import MarketDataAgent
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = MarketDataAgent(cfg)
-    agent.execute()
-    print(f"[market] Done. Symbols fetched: {agent.metrics.get('symbols_fetched', 0)}")
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[market] ERROR: MarketDataAgent failed.")
+        sys.exit(1)
+    fetched_assets = int(agent.metrics.get("fetched_assets", 0))
+    requested_assets = int(agent.metrics.get("requested_assets", 0))
+    full_ohlcv_assets = int(agent.metrics.get("full_ohlcv_assets", 0))
+    if fetched_assets <= 0:
+        print("[market] ERROR: MarketDataAgent reported zero fetched assets.")
+        sys.exit(1)
+    print(f"[market] Done. Requested={requested_assets} Fetched={fetched_assets} FullOHLCV={full_ohlcv_assets}")
 
 
 def cmd_onchain(args):
     from agents.onchain_agent import OnChainAgent
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = OnChainAgent(cfg)
-    agent.execute()
-    print(f"[onchain] Done. Output: {agent.output_paths}")
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[onchain] ERROR: OnChainAgent failed.")
+        sys.exit(1)
+    requested_assets = int(agent.metrics.get("requested_assets", 0))
+    assets_with_any = int(agent.metrics.get("assets_with_any_onchain", 0))
+    total_observations = int(agent.metrics.get("total_observations", 0))
+    if total_observations <= 0:
+        print("[onchain] ERROR: OnChainAgent reported zero observations.")
+        sys.exit(1)
+    print(
+        f"[onchain] Done. Requested={requested_assets} "
+        f"AssetsWithAny={assets_with_any} Observations={total_observations}"
+    )
 
 
 def cmd_features(args):
-    from agents.feature_agent import FeatureAgentV1, FeatureAgentV2
-    cfg = _get_cfg()
-    v1 = FeatureAgentV1(cfg)
-    success_v1 = v1.execute()
-    if not success_v1:
-        print("[features] ERROR: FeatureAgentV1 failed.")
+    from agents.feature_agent import FeatureAgent
+    cfg = _command_cfg(args)
+    agent = FeatureAgent(cfg)
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[features] ERROR: FeatureAgent failed.")
         sys.exit(1)
-
-    v2 = FeatureAgentV2(cfg)
-    success_v2 = v2.execute()
-    if not success_v2:
-        print("[features] ERROR: FeatureAgentV2 failed.")
+    market_rows = int(agent.metrics.get("market_rows", 0))
+    onchain_rows = int(agent.metrics.get("onchain_rows", 0))
+    full_rows = int(agent.metrics.get("full_rows", 0))
+    kept = int(agent.metrics.get("final_kept_feature_count", 0))
+    if full_rows <= 0:
+        print("[features] ERROR: FeatureAgent reported zero full feature rows.")
         sys.exit(1)
-
-    outputs = {**v1.output_paths, **v2.output_paths}
-    print(f"[features] Done. Output: {outputs}")
+    print(
+        f"[features] Done. MarketRows={market_rows} "
+        f"OnchainRows={onchain_rows} FullRows={full_rows} Features={kept}"
+    )
 
 
 def cmd_labels(args):
     from agents.label_agent import LabelAgent
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = LabelAgent(cfg)
-    agent.execute()
-    print(f"[labels] Done. Output: {agent.output_paths}")
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[labels] ERROR: LabelAgent failed.")
+        sys.exit(1)
+    horizons = cfg.get("labels", {}).get("horizons", [7, 14, 30])
+    matrix_rows = int(agent.metrics.get("label_matrix_rows", 0))
+    modeling_rows = int(agent.metrics.get("modeling_dataset_rows", 0))
+    symbols = int(agent.metrics.get("modeling_dataset_symbols", 0))
+    if matrix_rows <= 0 or modeling_rows <= 0:
+        print("[labels] ERROR: LabelAgent reported empty canonical outputs.")
+        sys.exit(1)
+    print(
+        f"[labels] Done. Horizons={horizons} "
+        f"LabelMatrixRows={matrix_rows} ModelingRows={modeling_rows} Symbols={symbols}"
+    )
 
 
 def cmd_models(args):
     from agents.model_agent import ModelAgent
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = ModelAgent(cfg)
-    agent.execute()
-    print(f"[models] Done. Metrics: {agent.metrics}")
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[models] ERROR: ModelAgent failed.")
+        sys.exit(1)
+    rows = int(agent.metrics.get("prediction_rows", 0))
+    folds = int(agent.metrics.get("fold_count", 0))
+    best_ic = agent.metrics.get("best_rank_ic")
+    if rows <= 0 or folds <= 0:
+        print("[models] ERROR: ModelAgent reported empty outputs.")
+        sys.exit(1)
+    print(f"[models] Done. PredictionRows={rows} Folds={folds} BestRankIC={best_ic}")
+
+
+def cmd_model(args):
+    return cmd_models(args)
 
 
 def cmd_portfolio(args):
     from agents.portfolio_agent import PortfolioAgent
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = PortfolioAgent(cfg)
-    agent.execute()
-    print(f"[portfolio] Done. Output: {agent.output_paths}")
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[portfolio] ERROR: PortfolioAgent failed.")
+        sys.exit(1)
+    rows = int(agent.metrics.get("allocation_rows", 0))
+    rebalances = int(agent.metrics.get("rebalance_count", 0))
+    if rows <= 0:
+        print("[portfolio] ERROR: PortfolioAgent reported empty allocations.")
+        sys.exit(1)
+    print(f"[portfolio] Done. AllocationRows={rows} Rebalances={rebalances}")
 
 
 def cmd_backtest(args):
     from agents.backtest_agent import BacktestAgent, _VBT_AVAILABLE
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     agent = BacktestAgent(cfg)
-    agent.execute()
-    print(f"[backtest] Done. VectorBT used: {_VBT_AVAILABLE}")
-    print(f"[backtest] Output: {agent.output_paths}")
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[backtest] ERROR: BacktestAgent failed.")
+        sys.exit(1)
+    cagr = agent.metrics.get("strategy_cagr")
+    sharpe = agent.metrics.get("strategy_sharpe")
+    print(f"[backtest] Done. VectorBT used: {_VBT_AVAILABLE} CAGR={cagr} Sharpe={sharpe}")
+
+
+def cmd_alpha_research(args):
+    from agents.alpha_research_agent import AlphaResearchAgent
+    cfg = _command_cfg(args)
+    agent = AlphaResearchAgent(cfg)
+    success = agent.execute(max_retries=1)
+    if not success:
+        print("[alpha_research] ERROR: AlphaResearchAgent failed.")
+        sys.exit(1)
+    run = int(agent.metrics.get("experiments_run", 0))
+    skipped = int(agent.metrics.get("experiments_skipped", 0))
+    passed = bool(agent.metrics.get("any_final_alpha_passed", False))
+    if run <= 0:
+        print("[alpha_research] ERROR: no experiments completed.")
+        sys.exit(1)
+    print(f"[alpha_research] Done. Experiments={run} Skipped={skipped} AnyFinalAlphaPassed={passed}")
 
 
 def cmd_ablation(args):
     import pandas as pd
     from models.ablation import run_ablation, print_ablation_summary
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     from configs.config import resolve_path
     feat_dir = resolve_path(cfg, "features")
     label_dir = resolve_path(cfg, "labels")
@@ -387,7 +511,7 @@ def cmd_ablation(args):
 
 def cmd_full(args):
     from pipelines.pipeline_runner import PipelineRunner
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     runner = PipelineRunner(cfg)
     results = runner.run_full_pipeline()
     success = all(results.values()) if isinstance(results, dict) and results else False
@@ -412,7 +536,7 @@ def cmd_schedule(args):
 
 def cmd_demo(args):
     """Generate canonical synthetic demo data so the dashboard and tests can load."""
-    cfg = _get_cfg()
+    cfg = _command_cfg(args)
     generate_demo_artifacts(cfg)
 
 
@@ -424,19 +548,27 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command", help="Pipeline stage to run")
 
-    subparsers.add_parser("universe", help="Run UniverseAgent")
-    subparsers.add_parser("market", help="Run MarketDataAgent")
-    subparsers.add_parser("onchain", help="Run OnChainAgent")
-    subparsers.add_parser("features", help="Run FeatureAgent")
-    subparsers.add_parser("labels", help="Run LabelAgent")
-    subparsers.add_parser("models", help="Run ModelAgent")
-    subparsers.add_parser("portfolio", help="Run PortfolioAgent")
-    subparsers.add_parser("backtest", help="Run BacktestAgent (vectorbt)")
-    subparsers.add_parser("ablation", help="Run ablation study")
-    subparsers.add_parser("full", help="Run full pipeline end-to-end")
-    subparsers.add_parser("serve", help="Start FastAPI server")
-    subparsers.add_parser("schedule", help="Start APScheduler daemon")
-    subparsers.add_parser("demo", help="Generate demo data for dashboard")
+    def add_stage_parser(name: str, help_text: str):
+        p = subparsers.add_parser(name, help=help_text)
+        p.add_argument("--config", default=None, help="Path to run_config.yaml")
+        p.add_argument("--section", default=None, help="Merge this config section into universe")
+        return p
+
+    add_stage_parser("universe", "Run UniverseAgent")
+    add_stage_parser("market", "Run MarketDataAgent")
+    add_stage_parser("onchain", "Run OnChainAgent")
+    add_stage_parser("features", "Run FeatureAgent")
+    add_stage_parser("labels", "Run LabelAgent")
+    add_stage_parser("models", "Run ModelAgent")
+    add_stage_parser("model", "Run ModelAgent")
+    add_stage_parser("portfolio", "Run PortfolioAgent")
+    add_stage_parser("backtest", "Run BacktestAgent (vectorbt)")
+    add_stage_parser("alpha_research", "Run AlphaResearchAgent")
+    add_stage_parser("ablation", "Run ablation study")
+    add_stage_parser("full", "Run full pipeline end-to-end")
+    add_stage_parser("serve", "Start FastAPI server")
+    add_stage_parser("schedule", "Start APScheduler daemon")
+    add_stage_parser("demo", "Generate demo data for dashboard")
 
     args = parser.parse_args()
 
@@ -447,8 +579,10 @@ def main():
         "features": cmd_features,
         "labels": cmd_labels,
         "models": cmd_models,
+        "model": cmd_model,
         "portfolio": cmd_portfolio,
         "backtest": cmd_backtest,
+        "alpha_research": cmd_alpha_research,
         "ablation": cmd_ablation,
         "full": cmd_full,
         "serve": cmd_serve,
@@ -470,7 +604,7 @@ def main():
         fn(args)
     except KeyboardInterrupt:
         print("\nInterrupted.")
-        sys.exit(0)
+        sys.exit(130)
     except Exception as e:
         print(f"\n[ERROR] {args.command} failed: {e}")
         traceback.print_exc()

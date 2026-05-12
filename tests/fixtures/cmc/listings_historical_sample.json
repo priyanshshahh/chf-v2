@@ -1,0 +1,57 @@
+{
+  "status": {
+    "timestamp": "2026-04-30T00:00:00.000Z",
+    "error_code": 0,
+    "error_message": null
+  },
+  "data": [
+    {
+      "id": 1,
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "slug": "bitcoin",
+      "cmc_rank": 1,
+      "is_active": 1,
+      "tags": ["mineable"],
+      "quote": {
+        "USD": {
+          "price": 42000.0,
+          "volume_24h": 20000000000.0,
+          "market_cap": 820000000000.0
+        }
+      }
+    },
+    {
+      "id": 1027,
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "slug": "ethereum",
+      "cmc_rank": 2,
+      "is_active": 1,
+      "tags": ["smart-contracts"],
+      "quote": {
+        "USD": {
+          "price": 2200.0,
+          "volume_24h": 12000000000.0,
+          "market_cap": 260000000000.0
+        }
+      }
+    },
+    {
+      "id": 825,
+      "name": "Tether USDt",
+      "symbol": "USDT",
+      "slug": "tether",
+      "cmc_rank": 3,
+      "is_active": 1,
+      "tags": ["stablecoin", "asset-backed-stablecoin"],
+      "quote": {
+        "USD": {
+          "price": 1.0,
+          "volume_24h": 80000000000.0,
+          "market_cap": 90000000000.0
+        }
+      }
+    }
+  ]
+}

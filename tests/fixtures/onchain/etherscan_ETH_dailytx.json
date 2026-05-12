@@ -1,0 +1,164 @@
+{
+  "result": [
+    {
+      "UTCDate": "2026-03-15",
+      "transactionCount": "10000"
+    },
+    {
+      "UTCDate": "2026-03-16",
+      "transactionCount": "10010"
+    },
+    {
+      "UTCDate": "2026-03-17",
+      "transactionCount": "10020"
+    },
+    {
+      "UTCDate": "2026-03-18",
+      "transactionCount": "10030"
+    },
+    {
+      "UTCDate": "2026-03-19",
+      "transactionCount": "10040"
+    },
+    {
+      "UTCDate": "2026-03-20",
+      "transactionCount": "10050"
+    },
+    {
+      "UTCDate": "2026-03-21",
+      "transactionCount": "10060"
+    },
+    {
+      "UTCDate": "2026-03-22",
+      "transactionCount": "10070"
+    },
+    {
+      "UTCDate": "2026-03-23",
+      "transactionCount": "10080"
+    },
+    {
+      "UTCDate": "2026-03-24",
+      "transactionCount": "10090"
+    },
+    {
+      "UTCDate": "2026-03-25",
+      "transactionCount": "10100"
+    },
+    {
+      "UTCDate": "2026-03-26",
+      "transactionCount": "10110"
+    },
+    {
+      "UTCDate": "2026-03-27",
+      "transactionCount": "10120"
+    },
+    {
+      "UTCDate": "2026-03-28",
+      "transactionCount": "10130"
+    },
+    {
+      "UTCDate": "2026-03-29",
+      "transactionCount": "10140"
+    },
+    {
+      "UTCDate": "2026-03-30",
+      "transactionCount": "10150"
+    },
+    {
+      "UTCDate": "2026-03-31",
+      "transactionCount": "10160"
+    },
+    {
+      "UTCDate": "2026-04-01",
+      "transactionCount": "10170"
+    },
+    {
+      "UTCDate": "2026-04-02",
+      "transactionCount": "10180"
+    },
+    {
+      "UTCDate": "2026-04-03",
+      "transactionCount": "10190"
+    },
+    {
+      "UTCDate": "2026-04-04",
+      "transactionCount": "10200"
+    },
+    {
+      "UTCDate": "2026-04-05",
+      "transactionCount": "10210"
+    },
+    {
+      "UTCDate": "2026-04-06",
+      "transactionCount": "10220"
+    },
+    {
+      "UTCDate": "2026-04-07",
+      "transactionCount": "10230"
+    },
+    {
+      "UTCDate": "2026-04-08",
+      "transactionCount": "10240"
+    },
+    {
+      "UTCDate": "2026-04-09",
+      "transactionCount": "10250"
+    },
+    {
+      "UTCDate": "2026-04-10",
+      "transactionCount": "10260"
+    },
+    {
+      "UTCDate": "2026-04-11",
+      "transactionCount": "10270"
+    },
+    {
+      "UTCDate": "2026-04-12",
+      "transactionCount": "10280"
+    },
+    {
+      "UTCDate": "2026-04-13",
+      "transactionCount": "10290"
+    },
+    {
+      "UTCDate": "2026-04-14",
+      "transactionCount": "10300"
+    },
+    {
+      "UTCDate": "2026-04-15",
+      "transactionCount": "10310"
+    },
+    {
+      "UTCDate": "2026-04-16",
+      "transactionCount": "10320"
+    },
+    {
+      "UTCDate": "2026-04-17",
+      "transactionCount": "10330"
+    },
+    {
+      "UTCDate": "2026-04-18",
+      "transactionCount": "10340"
+    },
+    {
+      "UTCDate": "2026-04-19",
+      "transactionCount": "10350"
+    },
+    {
+      "UTCDate": "2026-04-20",
+      "transactionCount": "10360"
+    },
+    {
+      "UTCDate": "2026-04-21",
+      "transactionCount": "10370"
+    },
+    {
+      "UTCDate": "2026-04-22",
+      "transactionCount": "10380"
+    },
+    {
+      "UTCDate": "2026-04-23",
+      "transactionCount": "10390"
+    }
+  ]
+}
