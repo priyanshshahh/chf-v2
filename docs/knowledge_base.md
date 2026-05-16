@@ -804,3 +804,44 @@ Guide coverage:
 - troubleshooting and verifier-first failure handling.
 
 No source code, research numbers, generated data, `.env` values, commits, or pushes were changed.
+
+## Phase 10 Benchmark Verification And Reviewer Packet (May 13, 2026)
+
+Phase 10 verified the candidate benchmark numbers from stored backtest artifacts and raw market prices without changing source logic, model/backtest calculations, generated outputs, `.env`, or research numbers.
+
+Benchmark verification:
+
+- Candidate benchmark folders inspected:
+  - `data/backtests_candidate_lightgbm_14d`
+  - `data/backtests_candidate_linear_ridge_30d`
+  - `data/backtests_candidate_random_forest_14d`
+- All three candidate backtests used the same benchmark window:
+  - start: `2022-12-15 00:00:00 UTC`
+  - end: `2026-03-24 00:00:00 UTC`
+- Benchmark returns:
+  - BTC: `305.50%`
+  - ETH: `69.85%`
+  - BTC/ETH 50-50: `178.04%`
+  - equal-weight universe: `30.39%`
+
+Manual BTC check from `data/raw/market/market_ohlcv.parquet`:
+
+- BTC start close on `2022-12-15`: `17,359.21`
+- BTC end close on `2026-03-24`: `70,532.10`
+- raw close-to-close return: `306.31%`
+- return after BacktestAgent's 20 bps initial benchmark cost: `305.50%`
+- BacktestAgent BTC benchmark return: `305.50%`
+- difference after cost convention: `0.000000%`
+
+Documentation added:
+
+- `docs/BENCHMARK_VERIFICATION.md`
+- `docs/FINAL_REVIEWER_PACKET.md`
+
+Clarification added:
+
+- Benchmark returns are measured over each candidate's backtest window, not over a trailing five-year public chart window.
+
+Final conclusion unchanged:
+
+- No verified alpha found under tested configurations.

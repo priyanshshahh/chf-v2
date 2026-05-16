@@ -58,6 +58,8 @@ This candidate beat ETH and the equal-weight universe but did not beat BTC or BT
 
 Aligned backtest window benchmark returns:
 
+Benchmark returns are measured over each candidate's backtest window, not over a trailing five-year public chart window. See [Benchmark Verification](BENCHMARK_VERIFICATION.md).
+
 | Benchmark | Total Return |
 |---|---:|
 | BTC | 305.50% |

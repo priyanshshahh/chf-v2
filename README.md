@@ -187,6 +187,8 @@ See [docs/REPRODUCIBILITY_COMMANDS.md](docs/REPRODUCIBILITY_COMMANDS.md) for com
 - [Alpha Findings Report](docs/ALPHA_FINDINGS_REPORT.md)
 - [Alpha Backtest Verification Report](docs/ALPHA_BACKTEST_VERIFICATION_REPORT.md)
 - [Alpha Signal Search Report](docs/ALPHA_SIGNAL_SEARCH_REPORT.md)
+- [Benchmark Verification](docs/BENCHMARK_VERIFICATION.md)
+- [Final Reviewer Packet](docs/FINAL_REVIEWER_PACKET.md)
 - [Limitations And Next Steps](docs/LIMITATIONS_AND_NEXT_STEPS.md)
 - [Reproducibility Commands](docs/REPRODUCIBILITY_COMMANDS.md)
 - [API Data Readiness Audit](docs/API_DATA_READINESS_AUDIT.md)

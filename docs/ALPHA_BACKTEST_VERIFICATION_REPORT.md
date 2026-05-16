@@ -113,6 +113,8 @@ Backtest window:
 - Start: `2022-12-15`
 - End: `2026-03-24`
 
+Benchmark returns are measured over each candidate's backtest window, not over a trailing five-year public chart window. See [Benchmark Verification](BENCHMARK_VERIFICATION.md).
+
 | benchmark | total_return | CAGR | Sharpe | max_drawdown |
 |---|---:|---:|---:|---:|
 | BTC | 3.0550 | 0.5330 | 1.1346 | -0.4964 |
