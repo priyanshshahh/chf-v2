@@ -87,8 +87,8 @@ metadata/     local runtime metadata; ignored by Git
 ## Quick Start
 
 ```bash
-git clone https://github.com/priyanshshahh/chf.git
-cd chf
+git clone https://github.com/priyanshshahh/chf-v2.git
+cd chf-v2
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -159,7 +159,7 @@ The scheduler runs locally until stopped. It is not a managed cloud service, and
 
 Public deployments should disable pipeline run buttons or protect them behind authentication. The dashboard is for research and education only, not financial advice.
 
-See [Dashboard Demo Guide](docs/DASHBOARD_DEMO_GUIDE.md).
+See [Dashboard Guide](docs/DASHBOARD_GUIDE.md).
 
 ## Production MVP Dashboard
 
@@ -221,30 +221,55 @@ See [docs/REPRODUCIBILITY_COMMANDS.md](docs/REPRODUCIBILITY_COMMANDS.md) for com
 
 ## Data And API Notes
 
-- Generated artifacts are not committed.
-- `data/` is ignored by Git.
-- Local runs create Parquet, JSON, and Markdown outputs under `data/`.
+**GitHub carries source only.** After cloning, generated outputs stay on your machine:
+
+| Local only (gitignored) | Regenerate with |
+|---|---|
+| `data/` — pipeline Parquet/JSON | `python main.py demo` or `python main.py full` |
+| `artifacts/` — model pickles, FI CSVs | same |
+| `mlruns/` — MLflow experiment store | same |
+| `coinmarketcap_data/` — CMC parquet/JSON bulk | `scripts/build_cmc_*.py` |
+| `coinmarketcap_extract/raw_daily_json/` | `coinmarketcap_extract/extract_cmc_daily_history.py` |
+| `.env` — API keys | copy from `.env.example` |
+
 - CoinMetrics Community and DeFiLlama may work without keys.
 - CoinMarketCap historical listings for a 3-year point-in-time universe were blocked by current plan access during this study.
-- `.env` must never be committed.
-- The repository should use `.env.example` for non-secret local setup guidance only.
+- `.env` must never be committed; use `.env.example` for non-secret local setup guidance only.
 
-## Final Reports
+## Security
 
-- [Research Results Summary](docs/RESEARCH_RESULTS_SUMMARY.md)
-- [Alpha Findings Report](docs/ALPHA_FINDINGS_REPORT.md)
+Before pushing to GitHub, install the local secret-scan hook and read [docs/SECURITY.md](docs/SECURITY.md):
+
+```bash
+make hooks          # blocks commits that contain .env or API keys
+```
+
+GitHub Actions runs the same checks on every push/PR (`.github/workflows/secret-scan.yml`). Use a **private repository** if you do not want the source code copied publicly.
+
+## Documentation
+
+**Research results**
+- [Research Results Summary](docs/RESEARCH_RESULTS_SUMMARY.md) — headline negative result
 - [Alpha Backtest Verification Report](docs/ALPHA_BACKTEST_VERIFICATION_REPORT.md)
 - [Alpha Signal Search Report](docs/ALPHA_SIGNAL_SEARCH_REPORT.md)
 - [Benchmark Verification](docs/BENCHMARK_VERIFICATION.md)
-- [Final Reviewer Packet](docs/FINAL_REVIEWER_PACKET.md)
-- [Reproducibility Checklist](docs/REPRODUCIBILITY_CHECKLIST.md)
-- [Artifact Manifest](docs/ARTIFACT_MANIFEST.md)
-- [Final Release Audit](docs/FINAL_RELEASE_AUDIT.md)
-- [Limitations And Next Steps](docs/LIMITATIONS_AND_NEXT_STEPS.md)
+
+**Project & methodology**
+- [Project Reference](docs/PROJECT_CHF_DOC.md)
+- [Agent Contracts](docs/agent_contracts.md)
+- [Data Dictionary](docs/data_dictionary.md)
+- Per-agent technical docs: [Universe](docs/UNIVERSE_AGENT.md) · [Market Data](docs/MARKET_DATA_AGENT.md) · [On-Chain](docs/ONCHAIN_AGENT.md) · [Feature](docs/FEATURE_AGENT.md) · [Label](docs/LABEL_AGENT.md) · [Model](docs/MODEL_AGENT.md) · [Portfolio](docs/PORTFOLIO_AGENT.md) · [Backtest](docs/BACKTEST_AGENT.md)
+
+**Run & reproduce**
 - [Reproducibility Commands](docs/REPRODUCIBILITY_COMMANDS.md)
-- [API Data Readiness Audit](docs/API_DATA_READINESS_AUDIT.md)
-- [CMC Historical Access Limitation](docs/CMC_HISTORICAL_ACCESS_LIMITATION.md)
-- [Pipeline Run Report](docs/PIPELINE_RUN_REPORT.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [API Keys And Data Sources](docs/API_KEYS_AND_DATA_SOURCES.md)
+- [CoinMarketCap Reference](docs/COINMARKETCAP.md)
+- [Dashboard Guide](docs/DASHBOARD_GUIDE.md) · [Product Dashboard Guide](docs/PRODUCT_DASHBOARD_GUIDE.md)
+
+**Roadmap & security**
+- [Roadmap & Known Limitations](docs/NEXT_STEPS.md)
+- [Security](docs/SECURITY.md)
 
 ## Limitations
 

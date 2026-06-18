@@ -1,0 +1,21 @@
+title = "CHF gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Safe templates and docs that mention key names without values"
+paths = [
+  '''\.env\.example$''',
+  '''docs/API_KEYS_AND_DATA_SOURCES\.md''',
+  '''docs/SECURITY\.md''',
+  '''scripts/check_secrets\.py''',
+  '''README\.md''',
+]
+
+[allowlist.regexTarget]
+description = "Comment-only or placeholder env lines"
+regexes = [
+  '''(?m)^\s*#\s*.*(?:API_KEY|SECRET|TOKEN|PASSWORD)''',
+  '''(?m)^\s*(?:COINGECKO|BINANCE|COINMETRICS|DEFILLAMA|COINMARKETCAP|ETHERSCAN|GRAPH)_API_KEY=\s*(?:#.*)?$''',
+]

@@ -289,7 +289,7 @@ These are stated honestly in the agent's own `limitations` string, `alpha_report
 - **Survivorship.** Results are **conditional on the latest eligible survivor universe** and
   may overstate historical tradability because full point-in-time membership and delisting data
   are not yet modeled (the CMC historical-listing limitation upstream — see
-  `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md`).
+  `docs/COINMARKETCAP.md`).
 - **No tear sheet.** No QuantStats-style tear sheet is generated; the agent emits raw parquet +
   a markdown QA report, not a polished PDF/HTML report.
 - **vectorbt `from_orders` path not wired.** `vectorbt` is optional and imported but the order

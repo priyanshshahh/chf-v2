@@ -1,3 +1,4 @@
+# Python / tooling caches
 __pycache__/
 *.py[cod]
 *.pyc
@@ -5,32 +6,60 @@ __pycache__/
 *.nbi
 .DS_Store
 .venv/
-logs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+
+# IDE / agent session files (local only)
+.cursor/
+.lingcode/
+.claude/
+.sixth/
 
 # Frontend local dependencies/build outputs
 node_modules/
 frontend/node_modules/
 frontend/dist/
 
-/data/cache/
-/data/*_smoke/
-/data/backups/
-/data/raw/
-/data/cleaned/
-/data/features/
-/data/labels/
-/data/predictions/
-/data/allocations/
-/data/backtests/
-/data/reports/
+# Logs (local run output)
+logs/
+*.log
 
-metadata/*.db
+# Secrets (commit .env.example only)
 .env
 .env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+*.jks
+credentials.json
+secrets.json
+id_rsa
+id_ed25519
+
+# Local-only planning docs
+*.docx
+
+# Generated pipeline outputs — regenerate with `python main.py demo` or `python main.py full`
 /data/
+/artifacts/
+/mlruns/
+metadata/*.db
+
+# Generated readiness report (rewritten by scripts/probe_api_readiness.py & audit_pipeline_inputs.py)
+docs/API_DATA_READINESS_AUDIT.md
+
+# CoinMarketCap bulk data (scripts + READMEs stay on GitHub; data stays local)
+coinmarketcap_data/**/*
+!coinmarketcap_data/README.md
+coinmarketcap_extract/raw_daily_json/
+coinmarketcap_extract/processed/
+coinmarketcap_extract/*.log
+
+# Local test/reference fixtures
 repo_status_after_phase6.txt
 .universe_golden_ref/

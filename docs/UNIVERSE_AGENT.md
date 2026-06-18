@@ -386,7 +386,7 @@ in cmc_id modes. Timestamps are UTC-aware.
   **history capped at 365 days**, no PIT listings. No key → heavy 429 throttling; Demo
   key → ~30 req/min.
 
-See `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md` for the full probe transcript.
+See `docs/COINMARKETCAP.md` for the full probe transcript.
 
 ---
 

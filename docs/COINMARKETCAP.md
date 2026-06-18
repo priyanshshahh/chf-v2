@@ -8,8 +8,8 @@ source** for CHF and the reason the production universe is survivorship-bias-fre
 
 Companion data folder: [`../coinmarketcap_data/`](../coinmarketcap_data/) holds a
 committed copy of every CMC dataset described here. Related: `docs/UNIVERSE_AGENT.md`
-(how the data becomes the universe) and `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md` (the
-original probe transcript).
+(how the data becomes the universe). The original CMC access-limitation probe
+transcript is consolidated into this document (see the sections below).
 
 ---
 
@@ -103,7 +103,7 @@ limits/credits **before** spending anything (free call).
 - **Deeper Pro `listings/historical` tiers**: Standard = 3 mo · Professional = 12 mo ·
   **Enterprise = up to 6 yr** (the only Pro path to multi-year survivorship-free membership).
 
-Probe transcript: `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md`. Diagnostics:
+Probe transcript: see the original-probe section below. Diagnostics:
 `python scripts/probe_api_readiness.py --config configs/run_config.yaml`.
 
 ---
@@ -140,6 +140,19 @@ under `data/external/` (gitignored). Numbers are from the live files.
 `coinmarketcap_data/*/raw_api_samples/*.json` — untouched response bodies (keyless
 `listings_historical_2021-01-01_top300.json` & `2024-02-01`, and Pro
 `listings_2026-06-01.json`) so the exact API shape is inspectable. No keys in them.
+
+### 4.5 `cmc_daily_listings_historical.parquet` — keyless daily 3-year extraction
+A separate, **daily**-granularity extraction from the keyless data-API, produced by the
+live subscription test in §10 and stored under
+[`../coinmarketcap_extract/`](../coinmarketcap_extract/) (`processed/`):
+- **218,643 rows · 1,095 daily snapshots · 2023-06-19 → 2026-06-17 · top-200/day.**
+- **507 unique `cmc_id`s · 516 unique symbols** — ~300 names churned in/out over 3 years,
+  the measurable signature of survivorship-free membership.
+- Same column schema as §4.1, plus an `is_active` column (see caveat in §10.3).
+- Coins present at the start but gone from the latest snapshot include **BUSD, AGIX, BLUR,
+  ABBC, ANT, BAND, BTG, CELO**, etc.
+- Companion `processed/extraction_manifest.json` (provenance: endpoint, span, snapshot
+  counts, unique coins, failures) and `processed/cmc_daily_listings_historical.csv`.
 
 ---
 
@@ -218,4 +231,142 @@ survivorship-free, point-in-time universe over 5.5 years for free, sidestepping 
 Hobbyist Pro-plan limitation. The Pro key adds 36-month daily quotes; the rest of CMC's
 paid depth (multi-year listings, OHLCV) is gated behind Standard/Professional/Enterprise
 and is not required for the current research result.
+
+---
+
+## 9. The original probe & research decision
+
+Before the keyless data-API was adopted, an initial probe established that the supplied
+Pro key could *see* a CoinMarketCap plan but that the plan did not provide the historical
+access needed for a three-year point-in-time universe. Non-secret errors observed at that
+time:
+
+- `/v1/cryptocurrency/listings/historical` → **HTTP 400** for `2023-05-01`, `2024-05-01`,
+  and `2026-03-31`; CMC message: plan allows only **1 month** of historical access.
+- `/v2/cryptocurrency/quotes/historical` → **HTTP 400** for `2023-05-01`–`2023-05-10`; CMC
+  message at that time: plan allows only **12 months** of historical access. (A later test
+  — §10 — found this window had been raised to 36 months / 3 years for `quotes/historical`.)
+- `/v2/cryptocurrency/ohlcv/historical` → **HTTP 403**, CMC error code **1006** (plan does
+  not support the historical OHLCV endpoint).
+
+**Listings ≠ daily market history.** For three-year point-in-time universe construction
+CHF needs `/v1/cryptocurrency/listings/historical`, because that endpoint returns the
+assets *listed at a historical date*, including active and inactive tickers when available
+— the required source for monthly Top-N historical membership snapshots. Historical quotes
+can price assets *after* they are selected, but quotes alone cannot tell CHF which assets
+belonged in the universe at each past month; using today's survivor list with old prices
+would still be a latest-survivor universe and overstates historical tradability.
+
+**Research decision recorded at the time of the probe:**
+- Do not build/run the CMC three-year historical universe path under a plan that lacks the
+  access — and do **not** fake point-in-time listings from current rankings, quote history,
+  or free-provider latest snapshots.
+- If no valid PIT source is available, the only acceptable fallback is the
+  latest-survivor/free-provider baseline, with survivorship bias **explicitly disclosed in
+  every report**, results treated as conditional on the latest eligible survivor universe,
+  and no professor-grade point-in-time validity claimed.
+- The requirement to unblock was one of: an upgraded CoinMarketCap plan with ≥3 years of
+  `/v1/cryptocurrency/listings/historical` access, **or** another verified point-in-time
+  listings source covering inactive + active assets with historical ranks/market caps.
+
+**This requirement is now met** by the keyless data-API (§2.1), which satisfies the second
+option. `professor_historical_universe_ready=true` for the `cmc_web_pit` source; the
+`latest_survivor_baseline_until_cmc_upgrade` mode is no longer the recommended path. The
+Pro `listings/historical` endpoint remains 1-month-capped on the Hobbyist plan, but it is
+no longer the only path. Full probe transcript: see the original-probe section below.
+
+---
+
+## 10. Live subscription re-test & the 3-year daily extraction (2026-06-17)
+
+The supplied subscription was re-tested live against `pro-api.coinmarketcap.com` on
+**2026-06-17** to answer one question directly: *does this plan give the historical ticker
+list?* **No — not via the Pro `listings/historical` endpoint.**
+
+### 10.1 What was tested, and the result
+
+| What was tested | Result |
+|---|---|
+| `/v1/key/info` | **HTTP 200** — rate limit **300/min** (the announced increase IS live), 150,000 credits/month, 2,363 used. |
+| `/v1/cryptocurrency/listings/historical` for `2023-07-01`, `2024-06-01`, `2025-06-01`, `2026-05-01` | **HTTP 400** — *"Your plan allows 1 months of historical access… choose a startDate that is newer than 2026-05-17."* |
+| `/v1/cryptocurrency/listings/historical` boundary test | **`2026-05-18` → HTTP 200**, **`2026-05-16` → HTTP 400** → window confirmed still **~1 month**, not 3 years. |
+| `/v2/cryptocurrency/quotes/historical` (BTC) for `2023-07` (3 yr back) | **HTTP 200** — daily points returned. |
+| **Keyless** `data-api/v3/.../listings/historical` for `2023-07-01` | **HTTP 200** — BTC, ETH, USDT, BNB, USDC … (works, free, no key). |
+
+**Interpretation.** CMC's "Hobbyist now includes 3 years of *daily* historical data" claim
+is **true for `/v2 quotes/historical`** (per-coin daily price/market-cap/volume, verified 3
+years back) and the **300/min rate-limit raise is genuine**. But the historical *listings*
+(ticker-list) endpoint — which returns *which* active **and inactive** coins were ranked at
+a past date — was **NOT** upgraded; it stays hard-capped at **1 month**. This is the
+critical distinction for look-ahead-free research: **listings (membership) ≠ quotes
+(per-coin prices).** On the current subscription the Pro `listings/historical` path
+therefore **cannot** build a 3-year historical ticker list.
+
+### 10.2 The extractor we built
+
+`coinmarketcap_extract/extract_cmc_daily_history.py` — a self-contained, resumable
+extractor that pulls **daily** historical top-N snapshots from the keyless data-API and
+writes a tidy combined table + raw JSON + a provenance manifest:
+
+- **Granularity** `--freq daily` (also `weekly`/`monthly`); default span 3 years back.
+- **Coverage** `--top 200` default (≥100 plus churn headroom so the historical top-100 is
+  always recoverable, including coins that later left the top-100).
+- **Integrity** no synthetic data; a date that fails returns to `failures` and is skipped,
+  never back-filled. Each day's raw response is cached → runs are resumable, re-runs free.
+  No API key is read or written (this endpoint is keyless).
+- **Robustness** handles both observed response shapes (`data:[...]` and
+  `data:{cryptoCurrencyList:[...]}`) and both quote shapes (`quotes[0].marketCap` and
+  `quote.USD.market_cap`).
+
+Run used to produce the data, and reproduction/extension commands:
+```bash
+# 3 years daily (what we ran)
+python3 coinmarketcap_extract/extract_cmc_daily_history.py --years 3 --top 200 --min-seconds 1.2
+
+# explicit window
+python3 coinmarketcap_extract/extract_cmc_daily_history.py --start 2023-06-17 --end 2026-06-17 --top 200
+
+# "entire history" later — monthly back to CMC's 2013 origin (daily would be ~4,700 calls)
+python3 coinmarketcap_extract/extract_cmc_daily_history.py --freq monthly --start 2013-05-05 --top 300
+```
+The same keyless endpoint reaches back to **2013-05-05**. Start monthly (cheap, ~157
+months) to map coverage, then densify to daily for the windows the model needs; everything
+is cached, so densifying only fetches the missing dates.
+
+### 10.3 What was extracted (real, from `extraction_manifest.json`)
+
+| Metric | Value |
+|---|---|
+| Frequency / depth | **daily**, top-200/day |
+| Coverage | **2023-06-19 → 2026-06-17** |
+| Daily snapshots built | **1,095** (of 1,096 requested) |
+| Total rows | **218,643** |
+| Unique coins (`cmc_id`) | **507** |
+| Unique symbols | **516** |
+| Live API calls | 1,089 |
+| Failures | **1** — `2026-06-18` (a future date with no data; correctly skipped, never fabricated) |
+
+That 507 unique coins cycle through a 200-deep daily list is the measurable signature of
+survivorship-free membership — ~300 names churned in and out over 3 years. A 7-day
+verification slice ran first and confirmed real data (BTC #1, ETH #2, USDT #3 — 1,050 rows
+/ 152 unique `cmc_id`s, 0 failures). Outputs land under `coinmarketcap_extract/processed/`
+(parquet + CSV + manifest) and `coinmarketcap_extract/raw_daily_json/YYYY-MM-DD.json`
+(per-day audit trail). See §4.5 for the dataset summary.
+
+> **Caveat on `is_active`:** the keyless endpoint returns `is_active=1` for every row,
+> because each row reflects the snapshot date on which the coin *was* active/ranked. The
+> delisted/inactive coverage is evidenced by **membership churn** (507 unique vs ~200/day),
+> **not** by the `is_active` column — do not rely on `is_active` as a delisted flag.
+
+Pattern provenance: this generalizes a working single-coin Bitcoin extractor (API loop →
+save JSON → convert to CSV) to the full daily top-N ticker list and the keyless
+historical-listings endpoint: **loop dates → cache raw JSON per date → parse → combined
+CSV/Parquet.** Full test narrative: see the 3-year daily-extraction section below.
+
+**Bottom line of the re-test:** the subscription does **not** give the 3-year historical
+*ticker list* via the Pro endpoint (still 1 month); the 3-year-daily upgrade and 300/min
+rate limit apply to `quotes/historical`. The full 3-year **daily** historical ticker list
+— active + inactive coins with daily market data — was obtained via the free keyless
+data-API, with resumable code to extract and extend it: **1,095 daily snapshots,
+2023-06-19 → 2026-06-17, 218,643 rows, 507 unique coins.**
 </content>

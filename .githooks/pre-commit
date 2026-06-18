@@ -1,0 +1,5 @@
+#!/bin/sh
+# Blocks commits that would expose secrets or local-only credential files.
+set -eu
+ROOT="$(git rev-parse --show-toplevel)"
+exec python3 "$ROOT/scripts/check_secrets.py"

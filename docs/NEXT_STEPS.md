@@ -1,6 +1,8 @@
-# What To Do Next — CHF Pipeline Owner Backlog
+# Roadmap & Known Limitations — CHF Pipeline Owner Backlog
 
-This is an actionable, prioritized backlog grounded in the current code and
+This is the single consolidated roadmap and known-limitations document for the
+CHF pipeline. It records the validity caveats of the frozen research run and an
+actionable, prioritized backlog grounded in the current code and
 `configs/run_config.yaml`. Every recommendation cites the real config key, file
 path, or command it touches. No performance numbers are invented here — the
 headline result is the deliberate **negative** result `alpha_verified=false`,
@@ -15,7 +17,7 @@ CV, prediction-only portfolio inputs, single alpha authority in `BacktestAgent`)
 and reproducible (deterministic seeds, content-hashed runs). The headline
 research result is a **deliberate negative**: `BacktestAgent` reported
 `alpha_verified=false` for every individually tested candidate
-(`docs/RESEARCH_RESULTS_SUMMARY.md`, `docs/LIMITATIONS_AND_NEXT_STEPS.md`). The
+(`docs/RESEARCH_RESULTS_SUMMARY.md`). The
 Model and Backtest agents were recently hardened: both now emit a deterministic
 `data_content_hash` (`agents/model_agent.py::_content_hash`,
 `agents/backtest_agent.py::_content_hash`), MLflow logging is gated and non-fatal
@@ -26,7 +28,65 @@ integrity of the negative result is the central constraint for everything below.
 
 ---
 
-## 2. Do this next (ordered backlog)
+## 2. Known limitations of the frozen run
+
+These are the validity caveats that bound the current production result. They are
+factual properties of the run as it stands and must stay disclosed; the backlog in
+§3 is the path to retiring them.
+
+### 2.1 CoinMarketCap historical universe access
+CoinMarketCap three-year historical listings are blocked by the current API plan.
+Observed access on the Hobbyist plan:
+- `/v1/cryptocurrency/listings/historical`: recent-window access works, but
+  three-year access is blocked; historical listings access window observed is
+  **1 month**.
+- `/v2/cryptocurrency/quotes/historical`: access window observed as **12 months**.
+- `/v2/cryptocurrency/ohlcv/historical`: **unsupported** under the current plan.
+
+This blocks professor-grade three-year point-in-time universe construction from
+CMC historical listings (`docs/COINMARKETCAP.md`). See §3 [5]
+for the keyless `cmc_web_pit` unblock path.
+
+### 2.2 Latest-survivor universe
+The current production research run uses the latest-survivor / free-provider
+baseline universe. Required disclosure:
+
+> Results are conditional on the latest eligible survivor universe and may
+> overstate historical tradability because full historical membership and
+> delisting data are not yet modeled.
+
+### 2.3 No full point-in-time historical universe yet
+The pipeline does not yet have a verified three-year historical active + inactive
+universe membership file. It must not claim point-in-time historical universe
+validity until historical listings are available and verified.
+
+### 2.4 Sparse on-chain coverage
+On-chain data was available for fewer assets than market data. CoinMetrics
+Community and DeFiLlama worked, but on-chain coverage remained sparse relative to
+the full market universe.
+
+### 2.5 Bounded alpha-search budget
+The final signal-search expansion ran **80** experiments, skipped **1,090**
+configured experiments by budget, and tested only a bounded sample of the larger
+search grid. This is enough to evaluate the current candidates, but not enough to
+exhaust the full alpha-search space.
+
+### 2.6 Market-only signals led this run
+The candidates that passed the signal screen were market-only:
+- `lightgbm / market_only / raw_forward_return / 14d`
+- `linear_ridge / market_only / raw_forward_return / 30d`
+- `random_forest / market_only / raw_forward_return / 14d`
+
+On-chain candidates did not produce a verified alpha result in this bounded run.
+
+### 2.7 No verified alpha yet
+`BacktestAgent` reported `alpha_verified=false` for every individually tested
+candidate. This negative result is the headline; nothing in this document should
+be done in a way that softens or overstates it.
+
+---
+
+## 3. Do this next (ordered backlog)
 
 ### [1] Enable real ML models for a production model run — RESULT-AFFECTING
 - **What:** `modeling.model_names` in `configs/run_config.yaml` currently defaults
@@ -76,7 +136,7 @@ integrity of the negative result is the central constraint for everything below.
   naive split, or you reintroduce leakage. Keep `random_seed: 42` honored for
   reproducibility.
 - **Effort:** 1–2 days incl. leakage-safety review. Compute scales with `n_trials`
-  — budget decision needed (see §3).
+  — budget decision needed (see §4).
 
 ### [4] Resolve the `ONCHAIN_HINTS` substring brittleness
 - **What:** The `market_only` vs `market_plus_onchain` feature split is decided by
@@ -87,7 +147,7 @@ integrity of the negative result is the central constraint for everything below.
   containing on-chain inputs (or vice-versa).
 - **Why:** This directly affects which feature set a candidate belongs to, and the
   negative result is partly framed as "market-only signals led this run"
-  (`docs/LIMITATIONS_AND_NEXT_STEPS.md`). A misclassification corrupts that claim.
+  (`docs/RESEARCH_RESULTS_SUMMARY.md`). A misclassification corrupts that claim.
 - **Where:** Replace substring heuristics with an explicit source tag carried from
   the feature store. The feature versions already exist in config
   (`features.feature_versions.market: market_v1`, `onchain: onchain_v1`); plumb a
@@ -102,12 +162,12 @@ integrity of the negative result is the central constraint for everything below.
   pipeline and compare before/after.
 - **Why:** Current production results are "conditional on the latest eligible
   survivor universe and may overstate historical tradability"
-  (`docs/RESEARCH_RESULTS_SUMMARY.md`, `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md`).
+  (`docs/RESEARCH_RESULTS_SUMMARY.md`, `docs/COINMARKETCAP.md`).
   This is the single biggest validity caveat.
 - **Concrete unblock path (already partially built):**
   1. The CMC Pro `/v1/cryptocurrency/listings/historical` endpoint remains
      **400-blocked** on the Hobbyist plan (1-month window only) — see
-     `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md`. Do **not** fake PIT listings from
+     `docs/COINMARKETCAP.md`. Do **not** fake PIT listings from
      current rankings.
   2. The **keyless** public data-API
      (`api.coinmarketcap.com/data-api/v3/.../listings/historical`) returns true
@@ -170,9 +230,48 @@ integrity of the negative result is the central constraint for everything below.
   the sole alpha authority.
 - **Effort:** 0.5–1 day each, both optional/low priority.
 
+### [8] Expand the alpha-search budget
+- **What:** Run more of the configured signal-search grid beyond the initial
+  **80** experiments. The frozen expansion skipped **1,090** configured
+  experiments by budget (§2.5), so only a bounded sample of the grid was tested.
+- **Why:** The current run is sufficient to evaluate the present candidates but
+  does not exhaust the search space. A wider sweep tests whether the negative
+  result is robust to broader exploration rather than an artifact of the bounded
+  budget.
+- **Where:** `AlphaResearchAgent` experiment-budget configuration. This is
+  signal-only expansion — `AlphaResearchAgent` may nominate candidates, but only
+  `BacktestAgent` may verify alpha. Do not let an expanded grid become a
+  back-door alpha claim.
+- **Effort:** Scales with grid size and compute budget (see §4); network/CPU
+  bound depending on models exercised.
+
+### [9] Test stronger label targets and regime filters
+- **What:** Prioritize excess-return labels, volatility-adjusted labels, and
+  cross-sectional rank targets, and add explicit bull / bear / high-volatility
+  regime filters, then add deeper robustness analysis (subperiod stability, cost
+  sensitivity, turnover sensitivity, regime-specific performance).
+- **Why:** The candidates that led this run used `raw_forward_return` labels
+  (§2.6). Stronger targets and regime conditioning are the most promising
+  research directions that do not rely on tuning the existing result until it
+  passes. Subperiod robustness already exists
+  (`backtesting.subperiod_analysis: true`); extend the same discipline to cost,
+  turnover, and regime cuts.
+- **Where:** Label stage (`labels` agent / `labels.*` config) for new targets;
+  `BacktestAgent` robustness reporting for the sensitivity cuts. Keep labels exact
+  forward calendar returns and leakage-safe by construction.
+- **Effort:** Multi-day; each new label/regime requires a full re-run and
+  re-verification through `BacktestAgent`.
+
+> **Research direction.** The correct near-term path is **not** to tune the
+> existing result until it passes. It is to reduce universe bias ([5]), expand the
+> experiment grid ([8]), test stronger labels and regime filters ([9]), and re-run
+> the same strict verification process. After any point-in-time universe correction
+> ([5]), retest candidate strategies and compare results before vs. after
+> survivorship-bias correction.
+
 ---
 
-## 3. What I need from you (decisions/inputs)
+## 4. What I need from you (decisions/inputs)
 
 1. **Enable ML models in the frozen result? (blocks [1])** This re-runs and
    re-verifies the canonical result. Confirm you want the headline to reflect
@@ -190,7 +289,7 @@ integrity of the negative result is the central constraint for everything below.
 
 ---
 
-## 4. How to verify after each change
+## 5. How to verify after each change
 
 Every stage has a matching verifier under `scripts/verify_<stage>_run.py`. Run the
 verifier for the stage you touched, then the offline + full suites:

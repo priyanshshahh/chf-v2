@@ -7,7 +7,7 @@ PIP    := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
 
 .PHONY: help setup bootstrap demo full universe market onchain features labels \
-        models portfolio backtest ablation serve dashboard mlflow smoke test clean
+        models portfolio backtest ablation serve dashboard mlflow smoke test clean hooks
 
 help:
 	@echo ""
@@ -39,6 +39,7 @@ help:
 	@echo "Testing:"
 	@echo "  make smoke       Run smoke test"
 	@echo "  make test        Run pytest suite"
+	@echo "  make hooks       Install git secret-scan pre-commit hook"
 	@echo "  make clean       Remove generated data and artifacts"
 	@echo ""
 
@@ -98,6 +99,9 @@ smoke:
 
 test:
 	$(PYTHON) -m pytest tests/ -v --tb=short
+
+hooks:
+	bash scripts/install_git_hooks.sh
 
 clean:
 	rm -rf data/raw data/staged data/cleaned data/features data/labels \

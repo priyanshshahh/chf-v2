@@ -82,7 +82,7 @@ Formatting: black + isort, line-length 100, target py311 (`pyproject.toml`).
 
 ## Known limitations (reflected in code/data)
 
-- Production universe is a latest-survivor baseline, not full point-in-time — CoinMarketCap 3-year historical listings were blocked by the API plan during this study (`docs/CMC_HISTORICAL_ACCESS_LIMITATION.md`).
+- Production universe is a latest-survivor baseline, not full point-in-time — CoinMarketCap 3-year historical listings were blocked by the API plan during this study (`docs/COINMARKETCAP.md`).
 - On-chain coverage is sparse relative to market coverage. No real-time execution engine. Research/education only.
 
 ## Reference docs

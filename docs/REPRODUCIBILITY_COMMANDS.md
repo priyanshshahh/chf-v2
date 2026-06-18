@@ -25,8 +25,7 @@ python3 scripts/audit_pipeline_inputs.py --config configs/run_config.yaml
 
 Outputs:
 
-- `docs/API_DATA_READINESS_AUDIT.md`
-- `docs/CMC_HISTORICAL_ACCESS_LIMITATION.md`
+- `docs/API_DATA_READINESS_AUDIT.md` (generated locally by the probe; not committed)
 - `data/readiness/api_probe_results.json`
 - `data/readiness/pipeline_input_audit.json`
 
@@ -205,13 +204,12 @@ Backtest validation: PASS
 ## Final Package Documents
 
 - `docs/RESEARCH_RESULTS_SUMMARY.md`
-- `docs/ALPHA_FINDINGS_REPORT.md`
-- `docs/LIMITATIONS_AND_NEXT_STEPS.md`
-- `docs/REPRODUCIBILITY_COMMANDS.md`
-- `docs/PIPELINE_RUN_REPORT.md`
 - `docs/ALPHA_BACKTEST_VERIFICATION_REPORT.md`
-- `docs/API_DATA_READINESS_AUDIT.md`
-- `docs/knowledge_base.md`
+- `docs/ALPHA_SIGNAL_SEARCH_REPORT.md`
+- `docs/BENCHMARK_VERIFICATION.md`
+- `docs/NEXT_STEPS.md`
+- `docs/REPRODUCIBILITY_COMMANDS.md`
+- `docs/PROJECT_CHF_DOC.md`
 
 ## Final Result
 
