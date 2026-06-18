@@ -4,7 +4,8 @@ title = "CHF gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "Safe templates and docs that mention key names without values"
+description = "Safe templates and docs that mention key names without values, plus comment-only or placeholder env lines"
+regexTarget = "line"
 paths = [
   '''\.env\.example$''',
   '''docs/API_KEYS_AND_DATA_SOURCES\.md''',
@@ -12,9 +13,6 @@ paths = [
   '''scripts/check_secrets\.py''',
   '''README\.md''',
 ]
-
-[allowlist.regexTarget]
-description = "Comment-only or placeholder env lines"
 regexes = [
   '''(?m)^\s*#\s*.*(?:API_KEY|SECRET|TOKEN|PASSWORD)''',
   '''(?m)^\s*(?:COINGECKO|BINANCE|COINMETRICS|DEFILLAMA|COINMARKETCAP|ETHERSCAN|GRAPH)_API_KEY=\s*(?:#.*)?$''',
