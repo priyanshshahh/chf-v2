@@ -135,6 +135,54 @@ Beginner guides:
 - [API Keys And Data Sources](docs/API_KEYS_AND_DATA_SOURCES.md)
 - [Dashboard Guide](docs/DASHBOARD_GUIDE.md)
 
+## Dashboard and Automation
+
+CHF includes a Streamlit control-center dashboard for local reviewer demos. It presents the frozen research release, benchmark verification, final result, limitations, reproducibility links, pipeline status, safe file browsing, and optional local run controls.
+
+Run the dashboard locally:
+
+```bash
+./run_dashboard.sh
+# or
+streamlit run app/dashboard.py
+```
+
+Pipeline run buttons are guarded by a confirmation checkbox and execute only existing local CLI commands. They may update local generated outputs under `data/`; they do not run automatically when the dashboard opens.
+
+Start the local scheduler:
+
+```bash
+./run_scheduler.sh
+```
+
+The scheduler runs locally until stopped. It is not a managed cloud service, and BacktestAgent remains manual/research-validation only by default.
+
+Public deployments should disable pipeline run buttons or protect them behind authentication. The dashboard is for research and education only, not financial advice.
+
+See [Dashboard Demo Guide](docs/DASHBOARD_DEMO_GUIDE.md).
+
+## Production MVP Dashboard
+
+CHF also includes a separate React product/MVP dashboard under `frontend/`. It presents **CHF Alpha Research OS** as a fintech-style product interface for agentic crypto research automation, portfolio intelligence, benchmark monitoring, reproducible review, and generated-artifact exploration. It is separate from the Streamlit research dashboard and does not recompute research or touch generated outputs.
+
+Run it directly:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Or after dependencies are installed:
+
+```bash
+./run_product_dashboard.sh
+```
+
+The React dashboard uses verified benchmark values from the frozen research docs and frames them as benchmark context, not as CHF strategy alpha. It also includes a Visualization Gallery and Portfolio Viewer that index existing local generated outputs only. Graphs and portfolio artifacts are not fabricated, and portfolio views are historical research artifacts rather than live holdings or financial advice. Public deployments should protect or disable any future command-execution features.
+
+See [Product Dashboard Guide](docs/PRODUCT_DASHBOARD_GUIDE.md).
+
 Run syntax validation:
 
 ```bash

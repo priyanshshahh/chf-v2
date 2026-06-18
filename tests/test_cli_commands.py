@@ -13,15 +13,22 @@ class _FakeFeatureAgent:
     def __init__(self, cfg):
         self.cfg = cfg
         self.output_paths = {"artifact": "ok"}
+        # cmd_features reads these metrics and requires full_rows > 0.
+        self.metrics = {
+            "market_rows": 10,
+            "onchain_rows": 5,
+            "full_rows": 10,
+            "final_kept_feature_count": 3,
+        }
 
-    def execute(self):
+    def execute(self, max_retries: int = 1):
         return True
 
 
-def test_cmd_features_runs_both_feature_stages(monkeypatch, capsys):
+def test_cmd_features_runs_feature_stage(monkeypatch, capsys):
+    # cmd_features uses the single FeatureAgent (FeatureAgentV1/V2 are subclasses of it).
     monkeypatch.setattr(main_module, "_get_cfg", lambda: {"_project_root": ".", "paths": {}})
-    monkeypatch.setattr(feature_agent, "FeatureAgentV1", _FakeFeatureAgent)
-    monkeypatch.setattr(feature_agent, "FeatureAgentV2", _FakeFeatureAgent)
+    monkeypatch.setattr(feature_agent, "FeatureAgent", _FakeFeatureAgent)
 
     main_module.cmd_features(SimpleNamespace())
     output = capsys.readouterr().out

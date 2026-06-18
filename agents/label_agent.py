@@ -149,6 +149,68 @@ class LabelAgent(AgentBase):
     def label_cfg(self) -> Dict[str, Any]:
         return self._label_cfg
 
+    def _content_hash(self, df: Optional[pd.DataFrame]) -> str:
+        """Deterministic 16-hex fingerprint of the modeling dataset (date_ts, symbol, features +
+        labels), order-independent and excluding provenance columns. Mirrors the other agents'
+        content hashing — the blueprint's SHA-256 reproducibility guarantee, so an identical
+        dataset yields an identical run fingerprint regardless of row order."""
+        if df is None or df.empty:
+            return ""
+        cols = [c for c in df.columns if c not in {"snapshot_id", "run_id", "created_at_utc"}]
+        sub = df[sorted(cols)].copy()
+        if "date_ts" in sub.columns:
+            sub["date_ts"] = pd.to_datetime(sub["date_ts"], utc=True)
+        sort_keys = [k for k in ["symbol", "date_ts"] if k in sub.columns]
+        if sort_keys:
+            sub = sub.sort_values(sort_keys)
+        return hashlib.sha256(sub.to_json(orient="records", date_format="iso").encode("utf-8")).hexdigest()[:16]
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any]) -> None:
+        """Log the label run to MLflow (params/metrics/tags/hash + artifacts). Non-fatal, gated
+        by mlflow.log_label_run."""
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_label_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow not available, skipping label logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(self._project_root / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"labels_{self.run_id}"):
+                mlflow.set_tags({"agent": "LabelAgent", "run_id": self.run_id,
+                                 "snapshot_id": self.snapshot_id or "",
+                                 "data_content_hash": manifest.get("data_content_hash", ""),
+                                 "label_type": str(manifest.get("label_type", ""))})
+                mlflow.log_params({k: manifest.get(k) for k in
+                                   ["label_type", "max_horizon_days", "recommended_embargo_days",
+                                    "min_assets_per_label_date"]
+                                   if manifest.get(k) is not None})
+                if manifest.get("horizons"):
+                    mlflow.log_param("horizons", ",".join(str(h) for h in manifest["horizons"]))
+                metrics = {k: float(self.metrics.get(k))
+                           for k in ["label_matrix_rows", "modeling_dataset_rows", "modeling_dataset_symbols",
+                                     "horizon_count", "max_horizon_days"]
+                           if self.metrics.get(k) is not None}
+                if metrics:
+                    mlflow.log_metrics(metrics)
+                if mlcfg.get("log_artifacts", True):
+                    for key in ["label_manifest", "label_coverage_report", "data_quality_labels"]:
+                        art = self.output_paths.get(key)
+                        try:
+                            if art and Path(art).exists():
+                                mlflow.log_artifact(str(art))
+                        except Exception:  # pragma: no cover
+                            pass
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow label logging failed (non-fatal): {exc}")
+
     def prepare(self) -> None:
         self._label_cfg = self.cfg.get("labels", {})
         self._output_dir = _resolve_path(self._project_root, self._label_cfg.get("output_dir", "data/labels"))
@@ -510,6 +572,7 @@ class LabelAgent(AgentBase):
         manifest = {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(modeling_dataset),
             "created_at_utc": _utcnow_iso(),
             "input_files": self._input_files,
             "input_manifest_summaries": self._input_manifest_summaries,
@@ -664,6 +727,8 @@ class LabelAgent(AgentBase):
         with open(manifest_path, "w") as fh:
             json.dump(manifest, fh, indent=2)
         self.output_paths["label_manifest"] = str(manifest_path)
+
+        self._log_to_mlflow(manifest)
 
     def _final_coverage_checks(
         self,

@@ -97,6 +97,8 @@ class OnChainAssetRequest:
     provider_asset_id: str
     market_cap_rank: int
     universe_snapshot_id: str
+    cmc_id: Optional[int] = None
+    is_ambiguous_ticker: bool = False
 
 
 @dataclass
@@ -134,6 +136,7 @@ class OnChainAgent(AgentBase):
         self.warnings: List[str] = []
         self.limitations: List[str] = []
         self.temporarily_unavailable_providers: Dict[str, str] = {}
+        self.provider_cooldown_until: Dict[str, float] = {}
         self.providers_unavailable: Dict[str, str] = {}
         self.providers_enabled: List[str] = []
         self.universe_snapshot_date: Optional[pd.Timestamp] = None
@@ -192,6 +195,27 @@ class OnChainAgent(AgentBase):
 
     def _now_utc(self) -> pd.Timestamp:
         return pd.Timestamp.now(tz="UTC")
+
+    def _as_of_date(self) -> pd.Timestamp:
+        """Phase 5: pinnable as-of date for deterministic 'drop current day' / window logic.
+        Defaults to today (UTC midnight); pin via onchain.as_of_date."""
+        raw = self.ocfg.get("as_of_date")
+        if raw:
+            return pd.to_datetime(raw, utc=True).normalize()
+        return self._now_utc().normalize()
+
+    def _content_hash(self, observations: pd.DataFrame) -> str:
+        """Deterministic 16-hex fingerprint of the on-chain panel."""
+        if observations is None or observations.empty:
+            return ""
+        cols = [c for c in ["symbol", "date_ts", "metric_name", "metric_value", "source"] if c in observations.columns]
+        if "symbol" not in cols or "date_ts" not in cols:
+            return ""
+        sub = observations[cols].copy()
+        sub["date_ts"] = pd.to_datetime(sub["date_ts"], utc=True)
+        sub = sub.sort_values(cols)
+        import hashlib
+        return hashlib.sha256(sub.to_json(orient="records", date_format="iso").encode("utf-8")).hexdigest()[:16]
 
     def prepare(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -259,10 +283,33 @@ class OnChainAgent(AgentBase):
                 self.limitations.append(
                     "Historical universe mode detected; OnChainAgent fetches unique/latest eligible assets and point-in-time membership filtering is downstream."
                 )
-        latest_snapshot = universe["snapshot_date"].max()
-        latest = universe[(universe["snapshot_date"] == latest_snapshot) & (universe["is_eligible"])].copy()
-        latest = latest.sort_values(["market_cap_rank", "symbol"], na_position="last")
-        self.universe_snapshot_date = latest_snapshot
+        # Phase 1 (PIT collapse fix): union_full_history fetches on-chain for EVERY coin ever
+        # eligible across all snapshots (incl. since-delisted), so dead coins get on-chain
+        # coverage in PIT mode instead of being silently dropped. Default = legacy latest_snapshot.
+        membership_mode = str(self.ocfg.get("universe_membership_mode", "latest_snapshot")).lower()
+        if membership_mode == "union_full_history":
+            eligible = universe[universe["is_eligible"]].copy()
+            if eligible.empty:
+                raise OnChainAgentError("Union universe has no eligible assets")
+            if "cmc_id" in eligible.columns and eligible["cmc_id"].notna().any():
+                latest = (
+                    eligible.sort_values(["snapshot_date", "market_cap_rank", "symbol"], na_position="last")
+                    .groupby("cmc_id", as_index=False)
+                    .last()
+                    .sort_values(["market_cap_rank", "symbol"], na_position="last")
+                )
+            else:
+                latest = (
+                    eligible.sort_values(["snapshot_date", "market_cap_rank", "symbol"], na_position="last")
+                    .drop_duplicates(subset=["symbol"], keep="last")
+                    .sort_values(["market_cap_rank", "symbol"], na_position="last")
+                )
+            self.universe_snapshot_date = eligible["snapshot_date"].max()
+        else:
+            latest_snapshot = universe["snapshot_date"].max()
+            latest = universe[(universe["snapshot_date"] == latest_snapshot) & (universe["is_eligible"])].copy()
+            latest = latest.sort_values(["market_cap_rank", "symbol"], na_position="last")
+            self.universe_snapshot_date = latest_snapshot
 
         coverage = pd.read_parquet(market_cov_path)
         required_cov_cols = {"symbol", "passed_qa", "is_full_ohlcv"}
@@ -302,8 +349,21 @@ class OnChainAgent(AgentBase):
                     provider_asset_id=str(row.get("provider_asset_id", row["coin_id"])),
                     market_cap_rank=int(row.get("market_cap_rank", 10**9)),
                     universe_snapshot_id=str(row.get("snapshot_id", "")),
+                    cmc_id=int(row["cmc_id"]) if "cmc_id" in row and pd.notna(row.get("cmc_id")) else None,
                 )
             )
+        # Phase 2 (#2): flag reused-ticker assets (one symbol → >1 cmc_id). Their on-chain
+        # data cannot be safely resolved by symbol against today's catalog (it would attach the
+        # currently-live coin's data to a different historical coin), so they are flagged here
+        # and refused in _fetch_asset — better no data than wrong-coin data.
+        sym_to_cmcids: Dict[str, set] = {}
+        for r in requests:
+            if r.cmc_id is not None:
+                sym_to_cmcids.setdefault(r.symbol, set()).add(r.cmc_id)
+        ambiguous = {s for s, ids in sym_to_cmcids.items() if len(ids) > 1}
+        for r in requests:
+            if r.symbol in ambiguous and r.cmc_id is not None:
+                r.is_ambiguous_ticker = True
         return requests, market_snapshot_id
 
     def _requested_end_from_market(self) -> pd.Timestamp:
@@ -311,7 +371,7 @@ class OnChainAgent(AgentBase):
         market = pd.read_parquet(market_path, columns=["date_ts"])
         market["date_ts"] = pd.to_datetime(market["date_ts"], utc=True).dt.normalize()
         market_end = market["date_ts"].max()
-        yesterday = self._now_utc().normalize() - pd.Timedelta(days=1)
+        yesterday = self._as_of_date() - pd.Timedelta(days=1)
         return min(market_end, yesterday)
 
     def run(self) -> Dict[str, Any]:
@@ -362,7 +422,14 @@ class OnChainAgent(AgentBase):
         provider_hits = {key: False for key in PROVIDER_KEYS}
         asset_started = time.monotonic()
 
-        for provider_key in self.ocfg.get("provider_priority", PROVIDER_KEYS):
+        # Phase 2 (#2): refuse reused-ticker assets — fetching by symbol would risk attaching
+        # the currently-live coin's on-chain data to a different historical coin. Skip all
+        # providers; the existing empty-result coverage logic records the reason.
+        refused_ambiguous = request.is_ambiguous_ticker and self.ocfg.get("refuse_ambiguous_ticker_resolution", True)
+        if refused_ambiguous:
+            provider_failure_reasons["asset"] = "ambiguous_ticker_refused"
+        provider_loop = [] if refused_ambiguous else self.ocfg.get("provider_priority", PROVIDER_KEYS)
+        for provider_key in provider_loop:
             if time.monotonic() - asset_started > float(self.ocfg.get("per_asset_timeout_seconds", 180)):
                 provider_failure_reasons["asset"] = "asset_timeout"
                 break
@@ -373,6 +440,9 @@ class OnChainAgent(AgentBase):
             if provider_key in self.temporarily_unavailable_providers:
                 provider_failure_reasons[provider_key] = self.temporarily_unavailable_providers[provider_key]
                 continue
+            if time.monotonic() < self.provider_cooldown_until.get(provider_key, 0.0):
+                provider_failure_reasons[provider_key] = "rate_limit_cooldown_active"
+                continue
             try:
                 result = self._run_provider(provider_key, request)
                 if result.failure_reason:
@@ -381,7 +451,12 @@ class OnChainAgent(AgentBase):
                     frames.append(result.observations)
                     fetched_metrics.extend(result.fetched_metrics)
                     provider_hits[provider_key] = True
-            except (RateLimitError, ProviderUnavailableError) as exc:
+            except RateLimitError as exc:
+                # Phase 5: transient — cool the provider for a bounded window, don't blacklist the run.
+                reason = str(exc)
+                provider_failure_reasons[provider_key] = reason
+                self.provider_cooldown_until[provider_key] = time.monotonic() + float(self.ocfg.get("provider_cooldown_seconds", 60))
+            except ProviderUnavailableError as exc:
                 reason = str(exc)
                 provider_failure_reasons[provider_key] = reason
                 self.temporarily_unavailable_providers[provider_key] = reason
@@ -400,7 +475,12 @@ class OnChainAgent(AgentBase):
             failure_reason = self._summarize_failure(provider_failure_reasons) or "no_onchain_data"
         else:
             unique_days = attempted_observations["date_ts"].nunique()
-            passed_qa = unique_days >= int(self.ocfg.get("min_history_days", 365))
+            # Phase 4 (#5): membership-aware floor keeps genuinely short-lived (delisted) coins
+            # instead of dropping the whole asset for <365 days of on-chain history.
+            min_history = int(self.ocfg.get("min_history_days", 365))
+            if str(self.ocfg.get("min_history_days_policy", "absolute")).lower() == "membership_aware":
+                min_history = int(self.ocfg.get("min_history_days_floor", 90))
+            passed_qa = unique_days >= min_history
             if not passed_qa:
                 failure_reason = "below_min_history_days"
                 persisted_observations = pd.DataFrame(columns=OBSERVATION_COLUMNS)
@@ -538,7 +618,7 @@ class OnChainAgent(AgentBase):
         normalized = normalized[normalized["symbol"].astype(str).str.upper() == symbol.upper()].copy()
         normalized = normalized[normalized["date_ts"] <= self.requested_end].copy()  # type: ignore[arg-type]
         normalized = normalized[normalized["date_ts"] >= self.requested_start].copy()  # type: ignore[arg-type]
-        normalized = normalized[normalized["date_ts"] < self._now_utc().normalize()].copy()
+        normalized = normalized[normalized["date_ts"] < self._as_of_date()].copy()
         normalized["metric_name"] = normalized["metric_name"].astype(str)
         normalized = normalized[
             ~(
@@ -546,6 +626,12 @@ class OnChainAgent(AgentBase):
                 & (normalized["metric_value"] < 0)
             )
         ].copy()
+        # Phase 3 (#3): quarantine look-ahead-unsafe metrics. DeFiLlama pool_tvl_usd/pool_apy
+        # come from the CURRENT /pools snapshot stamped onto end_dt — a today's-value-at-a-past-
+        # date look-ahead. Dropped by default; configurable via lookahead_unsafe_metrics.
+        unsafe = set(self.ocfg.get("lookahead_unsafe_metrics", ["pool_tvl_usd", "pool_apy"]))
+        if unsafe:
+            normalized = normalized[~normalized["metric_name"].isin(unsafe)].copy()
         market_days = self.market_calendar.get(symbol.upper(), set())
         if market_days:
             normalized = normalized[normalized["date_ts"].isin(market_days)].copy()
@@ -693,6 +779,8 @@ class OnChainAgent(AgentBase):
         manifest = {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(observations),
+            "as_of_date": self._as_of_date().date().isoformat(),
             "created_at_utc": self._now_utc().isoformat(),
             "universe_snapshot_date": self.universe_snapshot_date.isoformat() if self.universe_snapshot_date is not None else None,
             "market_snapshot_id": self.market_snapshot_id,
@@ -733,6 +821,44 @@ class OnChainAgent(AgentBase):
             json.dump(manifest, f, indent=2)
 
         self.output_paths.update(manifest["output_files"])
+        self._log_to_mlflow(manifest, [manifest_path, quality_path])
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any], artifact_paths: List[Path]) -> None:
+        """Phase 6 (blueprint): log the on-chain run to MLflow (params/metrics/hash + artifacts).
+        Backed by ./mlruns; fully non-fatal if MLflow is absent or errors. Gated by mlflow.log_onchain_run."""
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_onchain_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow not available, skipping onchain logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(Path(self.cfg["_project_root"]) / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"onchain_{self.run_id}"):
+                mlflow.set_tags({"agent": "OnChainAgent", "run_id": self.run_id,
+                                 "snapshot_id": self.snapshot_id or "",
+                                 "data_content_hash": manifest.get("data_content_hash", "")})
+                mlflow.log_params({k: manifest.get(k) for k in
+                                   ["as_of_date", "universe_snapshot_date", "requested_assets", "min_history_days"]
+                                   if manifest.get(k) is not None})
+                mlflow.log_metrics({k: float(manifest.get(k, 0) or 0) for k in
+                                    ["assets_with_any_onchain", "total_observations", "defillama_observations"]})
+                if mlcfg.get("log_artifacts", True):
+                    for art in artifact_paths:
+                        try:
+                            if art and Path(art).exists():
+                                mlflow.log_artifact(str(art))
+                        except Exception:  # pragma: no cover
+                            pass
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow onchain logging failed (non-fatal): {exc}")
 
     def _serialize_coverage_columns(self, coverage: pd.DataFrame) -> pd.DataFrame:
         if coverage.empty:
@@ -763,6 +889,24 @@ class OnChainAgent(AgentBase):
         df = observations.copy()
         df["year"] = pd.to_datetime(df["date_ts"], utc=True).dt.year
         df["month"] = pd.to_datetime(df["date_ts"], utc=True).dt.month
+        # Phase 6 (blueprint): prefer DuckDB COPY ... PARTITION_BY (year, month); fall back to
+        # pandas if DuckDB errors (defensive — partitioning is additive, must never fail persist).
+        try:
+            import duckdb
+            partition_root.mkdir(parents=True, exist_ok=True)
+            con = duckdb.connect(database=":memory:")
+            try:
+                con.register("onchain_df", df)
+                con.execute(
+                    "COPY (SELECT * FROM onchain_df) "
+                    f"TO '{partition_root.as_posix()}' "
+                    "(FORMAT PARQUET, PARTITION_BY (year, month), OVERWRITE_OR_IGNORE TRUE)"
+                )
+            finally:
+                con.close()
+            return
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            self.logger.warning(f"DuckDB partitioned write failed, using pandas fallback: {exc}")
         for (year, month), grp in df.groupby(["year", "month"]):
             part_dir = partition_root / f"year={int(year)}" / f"month={int(month):02d}"
             part_dir.mkdir(parents=True, exist_ok=True)

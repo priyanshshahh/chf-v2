@@ -41,7 +41,15 @@ def inspect_universe_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]
     exclusions_path = out_dir / "exclusions_monthly.parquet"
     coverage_path = out_dir / "universe_coverage_report.parquet"
     manifest_path = out_dir / "universe_manifest.json"
-    cmc_mode = bool(ucfg.get("use_cmc_historical_listings", False)) or cfg.get("universe", {}).get("provider_priority", [None])[0] == "coinmarketcap"
+    # cmc_id-keyed point-in-time modes (survivorship-free): live/downloaded CMC listings
+    # OR the keyless CMC web data-API snapshots. Detected from config source/flags here;
+    # additionally cross-checked against the manifest's uses_cmc_id below.
+    source = str(ucfg.get("source", "")).lower()
+    cmc_mode = (
+        bool(ucfg.get("use_cmc_historical_listings", False))
+        or cfg.get("universe", {}).get("provider_priority", [None])[0] == "coinmarketcap"
+        or source in ("cmc_web_pit", "cmc_listings_download", "cmc_listings_live")
+    )
 
     failures: List[str] = []
     warnings: List[str] = []
@@ -82,9 +90,14 @@ def inspect_universe_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]
         failures.append("eligible row has non-positive market_cap_usd")
     if "snapshot_id" in universe and universe["snapshot_id"].isna().any():
         failures.append("snapshot_id is null")
-    dup_cols = ["snapshot_date", "cmc_id"] if cmc_mode and "cmc_id" in universe.columns else ["snapshot_date", "symbol"]
-    if universe.duplicated(dup_cols).any():
-        failures.append(f"duplicate {' + '.join(dup_cols)} rows")
+    # Final universe must be unique on (snapshot, symbol) for downstream joins, and
+    # additionally on (snapshot, cmc_id) when cmc_id is the stable membership key.
+    dup_key_sets = [["snapshot_date", "symbol"]]
+    if cmc_mode and "cmc_id" in universe.columns:
+        dup_key_sets.append(["snapshot_date", "cmc_id"])
+    for dcols in dup_key_sets:
+        if universe.duplicated(dcols).any():
+            failures.append(f"duplicate {' + '.join(dcols)} rows")
     if not coverage.empty and not coverage["passed_validation"].fillna(False).all():
         failures.append("coverage report passed_validation is not true")
 
@@ -148,12 +161,14 @@ def inspect_universe_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]
     if cmc_mode:
         if membership is None or membership.empty:
             failures.append("universe_membership.parquet is empty")
-        if manifest.get("universe_mode") != "historical_cmc_monthly":
-            failures.append("manifest universe_mode != historical_cmc_monthly")
+        pit_modes = {"historical_cmc_monthly", "historical_cmc_web_monthly"}
+        if manifest.get("universe_mode") not in pit_modes:
+            failures.append(f"manifest universe_mode {manifest.get('universe_mode')!r} not a PIT mode {sorted(pit_modes)}")
         if manifest.get("survivor_only_universe") is not False:
-            failures.append("manifest survivor_only_universe is not false")
-        if int(manifest.get("historical_snapshots_created") or 0) < 24:
-            failures.append("historical_snapshots_created < 24 for CMC 3-year monthly mode")
+            failures.append("manifest survivor_only_universe is not false (PIT modes must be survivorship-free)")
+        min_snaps = int(ucfg.get("min_snapshots_required", 24))
+        if int(manifest.get("historical_snapshots_created") or 0) < min_snaps:
+            failures.append(f"historical_snapshots_created < {min_snaps} required for point-in-time monthly mode")
         if "cmc_id" not in universe.columns:
             failures.append("universe_monthly.parquet missing cmc_id")
         else:

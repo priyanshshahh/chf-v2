@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -36,7 +37,89 @@ CANONICAL_COLUMNS = [
     "data_type",
     "is_full_ohlcv",
     "quote_currency",
+    "is_universe_member",
+    "market_cap_rank",
+    "dollar_volume_usd",
+    "volume_basis",
+    "is_synthetic_ohlc",
+    "is_price_anomaly",
+    "price_basis",
+    "has_long_gap",
+    "volume_scope",
+    "is_stale_price",
 ]
+
+
+def _largest_segment_after_long_gap(missing_arr, max_allowed_gap: int) -> int:
+    """Return the index cutoff to keep all data AFTER the last gap longer than allowed.
+
+    Given a boolean array where True = a missing day, find the end position of the LAST
+    contiguous missing run longer than ``max_allowed_gap``; data from there onward has no
+    long gaps. Used by ``long_gap_policy: segment_and_flag`` to keep the most-recent
+    contiguous segment instead of discarding the whole asset.
+    """
+    n = len(missing_arr)
+    cutoff = 0
+    i = 0
+    while i < n:
+        if missing_arr[i]:
+            j = i
+            while j < n and missing_arr[j]:
+                j += 1
+            if (j - i) > max_allowed_gap:
+                cutoff = j
+            i = j
+        else:
+            i += 1
+    return cutoff
+
+
+# Per-source volume basis. Exchange (CCXT) candle volume is in BASE-asset units, so
+# USD dollar-volume = volume * close. Aggregator/index sources already report volume
+# in USD (quote), so dollar-volume = volume directly (multiplying by close would
+# double-count price). Close-only sources carry no usable volume.
+VOLUME_BASIS_BY_SOURCE = {
+    "cryptocompare": "quote_usd",   # histoday volumeto = USD
+    "coingecko": "quote_usd",       # total_volumes = USD
+    "coinpaprika": "quote_usd",     # ohlcv volume = USD
+    "coinmarketcap": "quote_usd",   # CMC ohlcv quote volume = USD
+    "coincap": "none",              # close-only, no volume
+}
+
+
+def volume_basis_for_source(source_used: str) -> str:
+    """Return the volume unit basis for a market source ('base', 'quote_usd', 'none')."""
+    s = str(source_used or "").lower()
+    if s.startswith("ccxt_"):
+        return "base"
+    return VOLUME_BASIS_BY_SOURCE.get(s, "base" if s else "none")
+
+
+# Per-source PRICE basis (limitation E). Exchange (CCXT) candles are a specific venue's
+# close; aggregator sources are a cross-venue composite index. These are different price
+# *definitions*, so price_basis is tagged per row and a verifier warns when an asset's
+# series mixes bases (venue-close spliced with index-close).
+def price_basis_for_source(source_used: str) -> str:
+    """Return the price definition basis ('venue_close', 'composite_index', 'unknown')."""
+    s = str(source_used or "").lower()
+    if not s:
+        return "unknown"
+    if s.startswith("ccxt_"):
+        return "venue_close"
+    return "composite_index"
+
+
+# Per-source VOLUME SCOPE (limitation #7). Exchange (CCXT) volume is a single venue's
+# traded volume; aggregator sources report a cross-venue GLOBAL volume. Same unit (after
+# Phase 2's dollar_volume_usd) but a different *quantity*, so scope is tagged for downstream.
+def volume_scope_for_source(source_used: str) -> str:
+    """Return the volume scope ('single_venue', 'global', 'unknown')."""
+    s = str(source_used or "").lower()
+    if not s:
+        return "unknown"
+    if s.startswith("ccxt_"):
+        return "single_venue"
+    return "global"
 
 
 @dataclass
@@ -84,7 +167,11 @@ class MarketDataAgent(AgentBase):
         self.api_call_count_by_provider: Dict[str, int] = {}
         self.cache_hit_count_by_provider: Dict[str, int] = {}
         self.provider_instances: Dict[str, CCXTMarketProvider] = {}
+        # Permanent (geo-block / DNS) — won't recover within a run.
         self.temporarily_unavailable_providers: Dict[str, str] = {}
+        # Phase 4: bounded per-provider cooldown for transient rate limits.
+        # provider_key -> monotonic deadline; retried once the deadline passes.
+        self.provider_cooldown_until: Dict[str, float] = {}
         self.cmc_provider: Optional[CoinMarketCapProvider] = None
 
     def _resolve_cache_dir(self) -> Path:
@@ -96,6 +183,161 @@ class MarketDataAgent(AgentBase):
 
     def _now_utc(self) -> pd.Timestamp:
         return pd.Timestamp.now(tz="UTC")
+
+    def _as_of_date(self) -> pd.Timestamp:
+        """Phase 4: pinnable 'as-of' date for deterministic runs.
+
+        Defaults to today (UTC midnight) but can be pinned via ``market_data.as_of_date``
+        so the requested window and the 'incomplete current day' cutoff are reproducible
+        across calendar days. Wall-clock is used only for non-semantic metadata
+        (``fetched_at_utc``).
+        """
+        raw = self.mcfg.get("as_of_date")
+        if raw:
+            return pd.to_datetime(raw, utc=True).normalize()
+        return self._now_utc().normalize()
+
+    def _content_hash(self, market_df: pd.DataFrame) -> str:
+        """Deterministic 16-hex content hash of the full price panel.
+
+        Covers (symbol, date_ts, open, high, low, close, volume) — not close alone — so a
+        change in any OHLC field or volume changes the fingerprint. Mirrors UniverseAgent's
+        content hashing; identical across runs over the same data regardless of wall-clock.
+        """
+        if market_df is None or market_df.empty:
+            return ""
+        wanted = ["symbol", "date_ts", "open", "high", "low", "close", "volume"]
+        cols = [c for c in wanted if c in market_df.columns]
+        if "symbol" not in cols or "date_ts" not in cols:
+            return ""
+        sub = market_df[cols].copy()
+        sub["date_ts"] = pd.to_datetime(sub["date_ts"], utc=True)
+        for c in ["open", "high", "low", "close", "volume"]:
+            if c in sub.columns:
+                sub[c] = pd.to_numeric(sub[c], errors="coerce")
+        sub = sub.sort_values(["symbol", "date_ts"])
+        payload = sub.to_json(orient="records", date_format="iso")
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+    def _write_partitioned_market(self, market_df: pd.DataFrame, out_dir: Path) -> Optional[Path]:
+        """Write a Hive-partitioned (symbol=…/year=…) Parquet copy via DuckDB COPY.
+
+        Additive to the flat ``market_ohlcv.parquet`` that downstream + verifiers read.
+        Yearly partition depth only (avoids the small-file problem). Deterministic rewrite:
+        the partition tree is cleared first. Defensive: any failure logs a warning and
+        returns None rather than failing the whole persist.
+        """
+        if market_df is None or market_df.empty or "date_ts" not in market_df.columns:
+            return None
+        partitioned_dir = out_dir / "partitioned"
+        try:
+            import shutil
+
+            import duckdb
+
+            if partitioned_dir.exists():
+                shutil.rmtree(partitioned_dir)
+            partitioned_dir.mkdir(parents=True, exist_ok=True)
+            frame = market_df.copy()
+            frame["date_ts"] = pd.to_datetime(frame["date_ts"], utc=True)
+            frame["year"] = frame["date_ts"].dt.year.astype(int)
+            con = duckdb.connect(database=":memory:")
+            try:
+                con.register("market_df", frame)
+                con.execute(
+                    "COPY (SELECT * FROM market_df) "
+                    f"TO '{partitioned_dir.as_posix()}' "
+                    "(FORMAT PARQUET, PARTITION_BY (symbol, year), OVERWRITE_OR_IGNORE TRUE)"
+                )
+            finally:
+                con.close()
+            return partitioned_dir
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.warning(f"partitioned market write failed (non-fatal): {exc}")
+            return None
+
+    def _flag_stale_prices(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Flag genuinely stale (frozen-feed) prices: a run of an identical REAL close longer
+        than ``max_flat_close_days``. Forward-filled synthetic flats are excluded (already
+        flagged via is_synthetic_ohlc/is_forward_filled). Non-destructive diagnostic.
+        """
+        df = df.copy()
+        if "is_stale_price" not in df.columns:
+            df["is_stale_price"] = False
+        n = int(self.mcfg.get("max_flat_close_days", 10))
+        if df.empty or "close" not in df.columns or n <= 0:
+            return df
+        close = pd.to_numeric(df["close"], errors="coerce")
+        run_id = (close != close.shift(1)).cumsum()
+        run_len = close.groupby(run_id).transform("size")
+        stale = (run_len > n) & close.notna()
+        if "is_forward_filled" in df.columns:
+            stale = stale & ~df["is_forward_filled"].fillna(False).astype(bool)
+        df["is_stale_price"] = stale.values
+        n_stale = int(stale.sum())
+        if n_stale:
+            self.metrics["stale_price_rows_total"] = float(self.metrics.get("stale_price_rows_total", 0.0) + n_stale)
+        return df
+
+    def _flag_price_anomalies(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Phase 5: flag (and optionally treat) spike-and-revert price anomalies.
+
+        A bar is an anomaly only when BOTH the move into it and the move out of it exceed
+        ``max_abs_daily_log_return`` AND they have opposite sign — i.e. a round-trip spike
+        that reverses the next day. This is the signature of a bad print / thin-venue glitch.
+        Crucially, a *legitimate* large move that is sustained (does not revert) is NOT
+        flagged, so real crypto rallies/crashes survive. Forward-filled synthetic bars are
+        never flagged (already tagged, volume 0).
+
+        ``anomaly_policy``: ``flag_only`` (default — non-destructive, downstream may mask),
+        ``drop`` (remove the bar), or ``winsorize`` (neutralize to the prior close).
+        """
+        df = df.copy()
+        df["is_price_anomaly"] = False
+        if df.empty or "close" not in df.columns or len(df) < 3:
+            return df
+        threshold = float(self.mcfg.get("max_abs_daily_log_return", 1.6094379124341003))  # ln(5) ≈ +400%/day
+        # Secondary, lower threshold for the round-trip-to-origin test (catches MODERATE bad
+        # prints): a spike of this magnitude that returns to within tolerance of the pre-spike
+        # price is a glitch regardless of whether each leg individually exceeds ln(5).
+        secondary = float(self.mcfg.get("anomaly_secondary_log_return", 0.9162907318741551))  # ln(2.5)
+        tol = float(self.mcfg.get("anomaly_roundtrip_tolerance", 0.15))  # 15% return-to-origin
+        close = pd.to_numeric(df["close"], errors="coerce")
+        prev = close.shift(1)
+        nxt = close.shift(-1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r_in = np.log(close / prev)
+            r_out = np.log(nxt / close)
+        opposite = (np.sign(r_in) * np.sign(r_out)) < 0
+        # (a) both legs huge + opposite sign (original egregious-glitch rule).
+        primary = (r_in.abs() > threshold) & (r_out.abs() > threshold) & opposite
+        # (b) round-trip to origin: a big spike whose NEXT close returns near the PRIOR close.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return_to_origin = (nxt - prev).abs() / prev.abs()
+        roundtrip = (r_in.abs() > secondary) & opposite & (return_to_origin <= tol)
+        anomaly = (primary | roundtrip).fillna(False)
+        # A sustained move (no revert) is never flagged: opposite=False or return_to_origin large.
+        if "is_synthetic_ohlc" in df.columns:
+            anomaly = anomaly & ~df["is_synthetic_ohlc"].fillna(False).astype(bool)
+        df["is_price_anomaly"] = anomaly.values
+        n_anom = int(anomaly.sum())
+        if n_anom:
+            self.metrics["price_anomalies_total"] = float(self.metrics.get("price_anomalies_total", 0.0) + n_anom)
+        policy = str(self.mcfg.get("anomaly_policy", "flag_only")).lower()
+        if n_anom and policy == "drop":
+            df = df[~df["is_price_anomaly"]].copy()
+        elif n_anom and policy == "winsorize":
+            # Neutralize the spike to a flat bar at the prior close — and mark it SYNTHETIC so
+            # range/ATR features exclude it (no unflagged fabricated bar).
+            mask = df["is_price_anomaly"].values
+            prior_vals = prev.values
+            for col in ["open", "high", "low", "close"]:
+                if col in df.columns:
+                    df.loc[mask, col] = prior_vals[mask]
+            if "is_synthetic_ohlc" not in df.columns:
+                df["is_synthetic_ohlc"] = False
+            df.loc[mask, "is_synthetic_ohlc"] = True
+        return df
 
     def prepare(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -118,6 +360,15 @@ class MarketDataAgent(AgentBase):
                 raise MarketDataAgentError("Binance is forbidden in research mode")
             if quote_cfg == "USDT":
                 raise MarketDataAgentError("USDT quote configuration is forbidden in research mode")
+        if (
+            str(self.mcfg.get("universe_membership_mode", "latest_snapshot")).lower() == "union_full_history"
+            and self.mcfg.get("require_pit_membership", False)
+            and not self._membership_daily_path().exists()
+        ):
+            raise MarketDataAgentError(
+                f"require_pit_membership=true but daily membership mask is missing: {self._membership_daily_path()}. "
+                "Run scripts/build_membership_daily.py first."
+            )
         self._load_universe_requests()
         if not self.asset_requests:
             raise MarketDataAgentError("No eligible market data asset requests were loaded from universe")
@@ -161,6 +412,10 @@ class MarketDataAgent(AgentBase):
                 )
             self.universe_snapshot_date = eligible["snapshot_date"].max()
             return
+        membership_mode = str(self.mcfg.get("universe_membership_mode", "latest_snapshot")).lower()
+        if membership_mode == "union_full_history":
+            self._load_union_requests(df)
+            return
         latest_snapshot = df["snapshot_date"].max()
         latest_df = df[(df["snapshot_date"] == latest_snapshot) & (df["is_eligible"])].copy()
         if latest_df.empty:
@@ -191,17 +446,158 @@ class MarketDataAgent(AgentBase):
             )
         self.universe_snapshot_date = latest_snapshot
 
+    def _load_union_requests(self, df: pd.DataFrame) -> None:
+        """Build one request per stable cmc_id across ALL monthly snapshots (PIT union).
+
+        This preserves the survivorship-free universe: every coin that was ever an
+        eligible member — including since-delisted names (FTT, LUNA, CEL, …) — gets a
+        fetch request, with routing/identity taken from its most recent eligible
+        snapshot. Per-day membership is re-applied later via the daily mask
+        (``_attach_membership_mask``) and by FeatureAgent, so the model only trades a
+        coin on the days it was actually in the top-N.
+        """
+        eligible = df[df["is_eligible"]].copy()
+        if eligible.empty:
+            raise MarketDataAgentError("Union universe has no eligible assets")
+        latest_per_coin = (
+            eligible.sort_values(["snapshot_date", "market_cap_rank", "symbol"], na_position="last")
+            .groupby("cmc_id", as_index=False)
+            .last()
+            .sort_values(["market_cap_rank", "symbol"], na_position="last")
+        )
+        max_assets = self.mcfg.get("max_assets")
+        if max_assets:
+            latest_per_coin = latest_per_coin.head(int(max_assets)).copy()
+        if self.symbols:
+            allowed = {s.upper() for s in self.symbols}
+            latest_per_coin = latest_per_coin[latest_per_coin["symbol"].astype(str).str.upper().isin(allowed)].copy()
+        for _, row in latest_per_coin.iterrows():
+            exchange = str(row.get("exchange") or "").lower().strip()
+            exchange_symbol = str(row.get("exchange_symbol") or "").strip()
+            if self.mcfg.get("fail_on_binance_usage", True):
+                if "binance" in exchange or "USDT" in exchange_symbol.upper():
+                    raise MarketDataAgentError(
+                        f"Universe contains forbidden market route for {row['symbol']}: {exchange} {exchange_symbol}"
+                    )
+            self.asset_requests.append(
+                AssetRequest(
+                    symbol=str(row["symbol"]).upper(),
+                    coin_id=str(row.get("coin_id") or row.get("slug") or row["symbol"]).lower(),
+                    exchange=exchange,
+                    exchange_symbol=exchange_symbol,
+                    cmc_id=int(row["cmc_id"]) if pd.notna(row.get("cmc_id")) else None,
+                )
+            )
+        self.universe_snapshot_date = eligible["snapshot_date"].max()
+        self.metrics["universe_union_assets"] = float(len(self.asset_requests))
+
+    def _membership_daily_path(self) -> Path:
+        raw = self.mcfg.get("membership_daily_path", "data/raw/universe/universe_membership_daily.parquet")
+        path = Path(raw)
+        if not path.is_absolute():
+            path = Path(self.cfg["_project_root"]) / path
+        return path
+
+    def _attach_membership_mask(self, market_df: pd.DataFrame) -> pd.DataFrame:
+        """Left-join the daily PIT membership mask onto the market panel.
+
+        Adds ``is_universe_member`` (True only on days the coin was an eligible
+        top-N member), and fills ``market_cap_rank`` / ``market_cap`` from the
+        membership record. Non-member rows are RETAINED (downstream feature warmup
+        needs pre-membership history) but flagged ``is_universe_member=False``.
+        Gated by ``attach_membership_mask`` (default off → columns are NA, behavior
+        unchanged).
+        """
+        if "is_universe_member" not in market_df.columns:
+            market_df["is_universe_member"] = pd.NA
+        if "market_cap_rank" not in market_df.columns:
+            market_df["market_cap_rank"] = pd.NA
+        if not bool(self.mcfg.get("attach_membership_mask", False)):
+            return market_df
+        if market_df.empty:
+            return market_df
+        mpath = self._membership_daily_path()
+        if not mpath.exists():
+            if self.mcfg.get("require_pit_membership", False):
+                raise MarketDataAgentError(f"attach_membership_mask=true but mask missing: {mpath}")
+            self.logger.warning(f"membership mask not found, skipping attach: {mpath}")
+            return market_df
+        mask = pd.read_parquet(mpath, columns=["date_ts", "cmc_id", "symbol", "market_cap_rank", "market_cap_usd"])
+        mask["date_ts"] = pd.to_datetime(mask["date_ts"], utc=True).dt.normalize()
+        market_df["date_ts"] = pd.to_datetime(market_df["date_ts"], utc=True).dt.normalize()
+        # Phase 9 (#4, #12): vectorized, collision-safe join. The cmc_id join is the stable
+        # primary; the symbol fallback is used ONLY for symbols that map to a single cmc_id in
+        # the mask (ambiguous reused tickers are excluded — no cross-coin mis-attribution).
+        n0 = len(market_df)
+        market_df = market_df.reset_index(drop=True)
+        market_df["_row"] = np.arange(n0)
+        market_df["_sym_u"] = market_df["symbol"].astype(str).str.upper()
+        cid_num = pd.to_numeric(market_df.get("cmc_id", pd.Series([pd.NA] * n0)), errors="coerce")
+        market_df["_cid_num"] = cid_num
+
+        # Primary: by (date_ts, cmc_id).
+        mask_id = mask.dropna(subset=["cmc_id"]).copy()
+        mask_id["_cid"] = pd.to_numeric(mask_id["cmc_id"], errors="coerce")
+        mask_id = mask_id.dropna(subset=["_cid"]).drop_duplicates(["date_ts", "_cid"])
+        mask_id = mask_id[["date_ts", "_cid", "market_cap_rank", "market_cap_usd"]].rename(
+            columns={"market_cap_rank": "_rank_id", "market_cap_usd": "_mcap_id"}
+        )
+        mask_id["_m_id"] = True
+        merged = market_df.merge(mask_id, left_on=["date_ts", "_cid_num"], right_on=["date_ts", "_cid"], how="left")
+
+        # Fallback: by (date_ts, symbol), unambiguous tickers only.
+        msym = mask.copy()
+        msym["symbol"] = msym["symbol"].astype(str).str.upper()
+        sym_card = msym.groupby("symbol")["cmc_id"].nunique(dropna=False)
+        unambiguous = set(sym_card[sym_card <= 1].index)
+        mask_sym = msym[msym["symbol"].isin(unambiguous)].drop_duplicates(["date_ts", "symbol"])
+        mask_sym = mask_sym[["date_ts", "symbol", "market_cap_rank", "market_cap_usd"]].rename(
+            columns={"symbol": "_sym", "market_cap_rank": "_rank_sym", "market_cap_usd": "_mcap_sym"}
+        )
+        mask_sym["_m_sym"] = True
+        merged = merged.merge(mask_sym, left_on=["date_ts", "_sym_u"], right_on=["date_ts", "_sym"], how="left")
+
+        if len(merged) != n0:  # defensive: keys must be unique → no row multiplication
+            merged = merged.drop_duplicates("_row").sort_values("_row")
+        merged = merged.sort_values("_row").reset_index(drop=True)
+
+        m_id = (merged["_m_id"] == True).to_numpy(dtype=bool)   # noqa: E712
+        m_sym = (merged["_m_sym"] == True).to_numpy(dtype=bool) & ~m_id   # noqa: E712
+        member = m_id | m_sym
+        cur_rank = market_df.get("market_cap_rank", pd.Series([pd.NA] * n0)).to_numpy()
+        rank = np.where(m_id, merged["_rank_id"].to_numpy(), np.where(m_sym, merged["_rank_sym"].to_numpy(), cur_rank))
+        cur_mcap = pd.to_numeric(market_df.get("market_cap", pd.Series([pd.NA] * n0)), errors="coerce").to_numpy()
+        mcap_mask = np.where(m_id, merged["_mcap_id"].to_numpy(), np.where(m_sym, merged["_mcap_sym"].to_numpy(), np.nan))
+        mcap = np.where(~np.isnan(cur_mcap), cur_mcap, mcap_mask)
+
+        market_df["is_universe_member"] = member
+        market_df["market_cap_rank"] = rank
+        market_df["market_cap"] = mcap
+        market_df = market_df.drop(columns=["_row", "_sym_u", "_cid_num"], errors="ignore")
+        members = member
+        member_rows = int(pd.Series(members).sum())
+        self.metrics["membership_member_rows"] = float(member_rows)
+        self.metrics["membership_total_rows"] = float(len(market_df))
+        self._progress(
+            f"[market] Membership mask attached: {member_rows}/{len(market_df)} rows are universe members"
+        )
+        return market_df
+
     def _load_symbols_from_universe(self) -> None:
         self._load_universe_requests()
         self.symbols = [request.symbol for request in self.asset_requests]
 
     def run(self) -> Dict[str, Any]:
-        now = self._now_utc()
-        requested_end = pd.to_datetime(self.mcfg["end_date"], utc=True).normalize() if self.mcfg.get("end_date") else now.normalize()
+        as_of = self._as_of_date()
+        requested_end = pd.to_datetime(self.mcfg["end_date"], utc=True).normalize() if self.mcfg.get("end_date") else as_of
         lookback_days = int(self.mcfg.get("lookback_days", self.mcfg.get("backfill_days", 2000)))
         requested_start = pd.to_datetime(self.mcfg["start_date"], utc=True).normalize() if self.mcfg.get("start_date") else requested_end - pd.Timedelta(days=lookback_days)
         snapshot_ref = self.universe_snapshot_date.date().isoformat() if self.universe_snapshot_date is not None else "unknown"
-        self.generate_snapshot_id(f"market:{snapshot_ref}")
+        # Phase 4: snapshot_id incorporates the data window so identical config + window
+        # is reproducible and a different window yields a distinct id.
+        self.generate_snapshot_id(
+            f"market:{snapshot_ref}:{requested_start.date().isoformat()}:{requested_end.date().isoformat()}"
+        )
 
         all_frames: List[pd.DataFrame] = []
         total_assets = len(self.asset_requests)
@@ -228,6 +624,13 @@ class MarketDataAgent(AgentBase):
         self.metrics["full_ohlcv_assets"] = full_ohlcv_assets
 
         market_df = pd.concat(all_frames, ignore_index=True) if all_frames else pd.DataFrame(columns=CANONICAL_COLUMNS)
+        # The survivorship-free union can legitimately carry two cmc_ids for one ticker
+        # (redenominations / ticker reuse: BTT 3718→16086, LUNA classic→2.0, DYDX, KNC).
+        # Both resolve to the same exchange series, so collapse to one (symbol, date_ts)
+        # row to preserve the downstream unique-key contract and avoid double-counting.
+        if not market_df.empty and {"symbol", "date_ts"}.issubset(market_df.columns):
+            market_df = market_df.drop_duplicates(subset=["symbol", "date_ts"], keep="first").reset_index(drop=True)
+        market_df = self._attach_membership_mask(market_df)
         coverage_df = pd.DataFrame(self.coverage_rows)
         fatal_errors = self._fatal_errors(
             requested_assets=requested_assets,
@@ -274,7 +677,12 @@ class MarketDataAgent(AgentBase):
 
     def _ordered_exchange_candidates(self, request: AssetRequest) -> List[str]:
         configured = [str(item).lower() for item in self.mcfg.get("exchange_priority", [])]
-        ordered = [request.exchange] + configured
+        hint = str(request.exchange or "").lower().strip()
+        # The universe's `exchange` field may carry a non-routable PIT placeholder
+        # (e.g. "cmc_market_pairs" from the tradability gate). Only honor it as a fetch
+        # route when it is a real, configured exchange — otherwise every asset wastes a
+        # guaranteed-failing ccxt attempt on a non-existent exchange.
+        ordered = ([hint] if hint in configured else []) + configured
         result: List[str] = []
         seen = set()
         for name in ordered:
@@ -302,6 +710,14 @@ class MarketDataAgent(AgentBase):
         provider_attempts: List[str] = []
         provider_failure_reasons: Dict[str, str] = {}
         asset_started = time.monotonic()
+        # A provider result shorter than the QA history floor (e.g. Coinbase's truncated
+        # OHLCV for AVAX) must NOT short-circuit the waterfall — keep trying richer
+        # providers/aggregators, and only settle for the longest short series if nothing
+        # clears the floor. This keeps source selection deterministic (fixed priority).
+        accept_min_rows = int(self.mcfg.get("min_history_days", 365))
+        if str(self.mcfg.get("min_history_days_policy", "absolute")).lower() == "membership_aware":
+            accept_min_rows = int(self.mcfg.get("min_history_days_floor", 90))
+        best_short: Optional[Dict[str, Any]] = None
 
         for exchange_name in self._ordered_exchange_candidates(request):
             if time.monotonic() - asset_started > float(self.mcfg.get("per_asset_timeout_seconds", 180)):
@@ -311,6 +727,10 @@ class MarketDataAgent(AgentBase):
             provider_key = provider.provider_key
             if provider_key in self.temporarily_unavailable_providers:
                 provider_failure_reasons[provider_key] = self.temporarily_unavailable_providers[provider_key]
+                continue
+            cooldown_until = self.provider_cooldown_until.get(provider_key, 0.0)
+            if time.monotonic() < cooldown_until:
+                provider_failure_reasons[provider_key] = "rate_limit_cooldown_active"
                 continue
             provider_attempts.append(provider_key)
             try:
@@ -332,6 +752,22 @@ class MarketDataAgent(AgentBase):
                     if self.mcfg.get("log_each_provider_attempt", True):
                         self._progress(f"[market] Result {provider_key} {request.symbol}: rows=0 status=fail reason=empty_response")
                     continue
+                if len(raw_df) < accept_min_rows:
+                    # Data returned but too short to clear the QA history floor. Stash the
+                    # longest such candidate and keep trying richer providers/aggregators.
+                    provider_failure_reasons[provider_key] = f"short_history:{len(raw_df)}<{accept_min_rows}"
+                    if best_short is None or len(raw_df) > int(best_short["rows"]):
+                        best_short = {
+                            "rows": len(raw_df),
+                            "df": raw_df.copy(),
+                            "provider_key": provider_key,
+                            "exchange_name": exchange_name,
+                            "market_symbol": market_symbol,
+                        }
+                    if self.mcfg.get("log_each_provider_attempt", True):
+                        self._progress(f"[market] Result {provider_key} {request.symbol}: rows={len(raw_df)} status=short reason=short_history:{len(raw_df)}<{accept_min_rows}")
+                    raw_df = pd.DataFrame()
+                    continue
                 source_used = provider_key
                 data_type = "exchange_ohlcv"
                 is_full_ohlcv = True
@@ -341,7 +777,18 @@ class MarketDataAgent(AgentBase):
                 if self.mcfg.get("log_each_provider_attempt", True):
                     self._progress(f"[market] Result {provider_key} {request.symbol}: rows={len(raw_df)} status=success reason=")
                 break
-            except (RateLimitError, ProviderUnavailableError) as exc:
+            except RateLimitError as exc:
+                # Phase 4: transient — cool the provider down for a bounded window instead of
+                # abandoning it for the whole run (keeps source selection run-order-independent).
+                reason = str(exc)
+                provider_failure_reasons[provider_key] = reason
+                self.provider_cooldown_until[provider_key] = time.monotonic() + float(
+                    self.mcfg.get("provider_cooldown_seconds", 60)
+                )
+                if self.mcfg.get("log_each_provider_attempt", True):
+                    self._progress(f"[market] Result {provider_key} {request.symbol}: rows=0 status=fail reason={reason}")
+            except ProviderUnavailableError as exc:
+                # Geo-block / DNS — will not recover within the run; skip permanently.
                 reason = str(exc)
                 provider_failure_reasons[provider_key] = reason
                 self.temporarily_unavailable_providers[provider_key] = reason
@@ -378,6 +825,17 @@ class MarketDataAgent(AgentBase):
                 is_full_ohlcv = fallback_result.is_full_ohlcv
                 fallback_used = True
                 self.fallbacks_used.add(fallback_result.provider_name)
+
+        if raw_df.empty and best_short is not None:
+            # No exchange or aggregator cleared the history floor; record the longest short
+            # series we saw rather than dropping the asset, so QA/coverage report it honestly.
+            raw_df = best_short["df"]
+            source_used = best_short["provider_key"]
+            data_type = "exchange_ohlcv"
+            is_full_ohlcv = True
+            chosen_exchange = best_short["exchange_name"]
+            self.exchanges_used.add(best_short["exchange_name"])
+            request_exchange_symbol = best_short["market_symbol"]
 
         if raw_df.empty:
             failure_reason = self._summarize_failure(provider_failure_reasons)
@@ -648,7 +1106,7 @@ class MarketDataAgent(AgentBase):
 
         incomplete_rows_dropped = 0
         if self.mcfg.get("drop_incomplete_current_day", True):
-            current_day = self._now_utc().normalize()
+            current_day = self._as_of_date()
             before = len(df)
             df = df[df["date_ts"] < current_day].copy()
             incomplete_rows_dropped = before - len(df)
@@ -660,6 +1118,7 @@ class MarketDataAgent(AgentBase):
 
         missing_days = 0
         forward_filled_days = 0
+        long_gap_flagged = False
         if self.mcfg.get("forward_fill_missing_days", True):
             full_index = pd.date_range(start=df["date_ts"].min(), end=df["date_ts"].max(), freq="D", tz="UTC")
             df = df.set_index("date_ts").reindex(full_index)
@@ -671,12 +1130,23 @@ class MarketDataAgent(AgentBase):
                 max_gap = int(missing_mask.astype(int).groupby((~missing_mask).cumsum()).sum().max())
                 max_allowed_gap = int(self.mcfg.get("max_forward_fill_gap_days", 3))
                 if max_gap > max_allowed_gap:
-                    return pd.DataFrame(columns=CANONICAL_COLUMNS), self._qa_payload(
-                        "missing_gap_exceeds_max_forward_fill_gap",
-                        missing_days=missing_days,
-                        forward_filled_days=0,
-                        incomplete_rows_dropped=incomplete_rows_dropped,
-                    )
+                    policy = str(self.mcfg.get("long_gap_policy", "reject_asset")).lower()
+                    if policy != "segment_and_flag":
+                        # Legacy default: a single long gap rejects the whole asset.
+                        return pd.DataFrame(columns=CANONICAL_COLUMNS), self._qa_payload(
+                            "missing_gap_exceeds_max_forward_fill_gap",
+                            missing_days=missing_days,
+                            forward_filled_days=0,
+                            incomplete_rows_dropped=incomplete_rows_dropped,
+                        )
+                    # Phase 8 (F): keep the most-recent contiguous segment, flag the gap.
+                    cutoff = _largest_segment_after_long_gap(missing_mask.to_numpy(), max_allowed_gap)
+                    df = df.iloc[cutoff:].copy()
+                    long_gap_flagged = True
+                    valid_close = pd.to_numeric(df["close"], errors="coerce").replace([np.inf, -np.inf], pd.NA)
+                    valid_close = valid_close.where(valid_close > 0)
+                    missing_mask = valid_close.isna()
+                    missing_days = int(missing_mask.sum())
             close_series = valid_close.ffill()
             fillable_mask = missing_mask & close_series.notna() & (close_series > 0)
             forward_filled_days = int(fillable_mask.sum())
@@ -693,6 +1163,12 @@ class MarketDataAgent(AgentBase):
             if self.mcfg.get("set_filled_volume_to_zero", True):
                 df.loc[fillable_mask, "volume"] = 0.0
             df["is_forward_filled"] = fillable_mask.values
+            # Phase 3: flag forward-filled full-OHLCV bars as SYNTHETIC. Their open/high/low
+            # are carried-forward fabrications (high=low=close), not real intraday range, so
+            # downstream range/vol features (ATR, hl_range) must exclude them. Close is a
+            # legitimate mark-to-market carry and is retained.
+            df["is_synthetic_ohlc"] = (fillable_mask.values & bool(is_full_ohlcv))
+            df["has_long_gap"] = bool(long_gap_flagged)
             df = df.reset_index().rename(columns={"index": "date_ts"})
             if is_full_ohlcv:
                 df = df.dropna(subset=["open", "high", "low", "close"])
@@ -703,8 +1179,15 @@ class MarketDataAgent(AgentBase):
         else:
             df = df.reset_index(drop=True)
             df["is_forward_filled"] = False
+            df["is_synthetic_ohlc"] = False
+            df["has_long_gap"] = False
 
+        # Phase 8 (G): membership-aware history floor. In membership_aware mode the floor
+        # drops to min_history_days_floor so genuinely short-lived members (delisted coins)
+        # are kept instead of excluded for "insufficient history".
         min_history_days = int(self.mcfg.get("min_history_days", 365))
+        if str(self.mcfg.get("min_history_days_policy", "absolute")).lower() == "membership_aware":
+            min_history_days = int(self.mcfg.get("min_history_days_floor", 90))
         if len(df) < min_history_days:
             return pd.DataFrame(columns=CANONICAL_COLUMNS), self._qa_payload(
                 f"history_below_min_history_days:{len(df)}<{min_history_days}",
@@ -712,6 +1195,9 @@ class MarketDataAgent(AgentBase):
                 forward_filled_days=forward_filled_days,
                 incomplete_rows_dropped=incomplete_rows_dropped,
             )
+
+        # Phase 5: flag spike-and-revert price anomalies (bad prints), apply policy.
+        df = self._flag_price_anomalies(df)
 
         df["symbol"] = request.symbol
         df["cmc_id"] = request.cmc_id
@@ -726,6 +1212,24 @@ class MarketDataAgent(AgentBase):
         df["data_type"] = data_type
         df["is_full_ohlcv"] = bool(is_full_ohlcv)
         df["quote_currency"] = self.mcfg.get("quote_currency", "USD")
+        # Phase 2: canonical USD dollar-volume, unit-correct per source.
+        basis = volume_basis_for_source(source_used)
+        df["volume_basis"] = basis
+        # Phase 8 (E): tag the price definition basis (venue close vs composite index).
+        df["price_basis"] = price_basis_for_source(source_used)
+        # Phase 9 (#7): tag volume scope (single venue vs cross-venue global).
+        df["volume_scope"] = volume_scope_for_source(source_used)
+        vol = pd.to_numeric(df["volume"], errors="coerce")
+        close_num = pd.to_numeric(df["close"], errors="coerce")
+        if basis == "base":
+            df["dollar_volume_usd"] = vol * close_num
+        elif basis == "quote_usd":
+            df["dollar_volume_usd"] = vol
+        else:
+            df["dollar_volume_usd"] = pd.NA
+        # Phase 9 (#9): flag genuinely stale (frozen-feed) prices — long runs of an identical
+        # REAL close (forward-filled synthetic flats are excluded, already flagged).
+        df = self._flag_stale_prices(df)
         for col in CANONICAL_COLUMNS:
             if col not in df.columns:
                 df[col] = pd.NA
@@ -781,7 +1285,7 @@ class MarketDataAgent(AgentBase):
         if self.mcfg.get("fail_on_binance_usage", True):
             if df["exchange"].astype(str).str.contains("binance", case=False).any():
                 return "binance_exchange_detected"
-            if df["exchange_symbol"].astype(str).str.contains("USDT", case=False).any():
+            if not self.mcfg.get("allow_usdt_fallback", False) and df["exchange_symbol"].astype(str).str.contains("USDT", case=False).any():
                 return "usdt_exchange_symbol_detected"
             if df["source"].astype(str).str.contains("binance", case=False).any():
                 return "binance_source_detected"
@@ -915,6 +1419,13 @@ class MarketDataAgent(AgentBase):
             symbol_df.to_parquet(symbol_path, index=False)
             self.output_paths[f"ohlcv_{symbol}"] = str(symbol_path)
 
+        # Phase 6: Hive-partitioned copy (symbol=…/year=…) for filter-pushdown reads,
+        # IN ADDITION to the canonical flat market_ohlcv.parquet (never replacing it).
+        if self.mcfg.get("write_partitioned_market", True):
+            partitioned_dir = self._write_partitioned_market(market_df, out_dir)
+            if partitioned_dir:
+                self.output_paths["partitioned_dir"] = str(partitioned_dir)
+
         coverage_ratio = float(fetched_assets / max(requested_assets, 1))
         full_ohlcv_coverage_ratio = float(full_ohlcv_assets / max(requested_assets, 1))
         warnings: List[str] = []
@@ -928,6 +1439,10 @@ class MarketDataAgent(AgentBase):
         manifest = {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(market_df),
+            "as_of_date": self._as_of_date().date().isoformat(),
+            "price_anomalies_total": int(self.metrics.get("price_anomalies_total", 0)),
+            "anomaly_policy": str(self.mcfg.get("anomaly_policy", "flag_only")),
             "created_at_utc": self._now_utc().isoformat(),
             "universe_snapshot_date": self.universe_snapshot_date.date().isoformat() if self.universe_snapshot_date is not None else "",
             "requested_assets": requested_assets,
@@ -992,6 +1507,68 @@ class MarketDataAgent(AgentBase):
                 "data_quality_daily": str(quality_path),
             }
         )
+
+        # Phase 7: log this run to MLflow (provenance + artifacts). Non-fatal if absent.
+        self._log_to_mlflow(manifest, [manifest_path, quality_path])
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any], artifact_paths: List[Path]) -> None:
+        """Log the market run to MLflow: params, metrics, content hash, and artifacts.
+
+        Backed by ``./mlruns`` (config ``mlflow.tracking_uri``). Fully defensive — if
+        MLflow is not importable or logging fails, it warns and returns without affecting
+        the run. Gated by ``mlflow.log_market_run`` (default True).
+        """
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_market_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover - environment dependent
+            self.logger.warning(f"mlflow not available, skipping logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(Path(self.cfg["_project_root"]) / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"market_{self.run_id}"):
+                mlflow.set_tags(
+                    {
+                        "agent": "MarketDataAgent",
+                        "run_id": self.run_id,
+                        "snapshot_id": self.snapshot_id or "",
+                        "data_content_hash": manifest.get("data_content_hash", ""),
+                    }
+                )
+                params = {
+                    k: manifest.get(k)
+                    for k in [
+                        "as_of_date", "universe_snapshot_date", "requested_assets",
+                        "lookback_days", "min_history_days", "anomaly_policy", "provider",
+                    ]
+                    if manifest.get(k) is not None
+                }
+                if params:
+                    mlflow.log_params(params)
+                metrics = {
+                    k: float(manifest.get(k, 0) or 0)
+                    for k in [
+                        "fetched_assets", "full_ohlcv_assets", "persisted_assets",
+                        "coverage_ratio", "full_ohlcv_coverage_ratio", "price_anomalies_total",
+                    ]
+                }
+                mlflow.log_metrics(metrics)
+                if mlcfg.get("log_artifacts", True):
+                    for art in artifact_paths:
+                        try:
+                            if art and Path(art).exists():
+                                mlflow.log_artifact(str(art))
+                        except Exception as exc:  # pragma: no cover
+                            self.logger.warning(f"mlflow artifact log failed for {art}: {exc}")
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover - environment dependent
+            self.logger.warning(f"mlflow logging failed (non-fatal): {exc}")
 
     def _market_symbol_for_provider(
         self,

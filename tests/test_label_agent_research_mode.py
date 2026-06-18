@@ -25,6 +25,7 @@ def _cfg(tmp_path: Path) -> dict:
     labels["min_common_rows_all_horizons"] = 50
     labels["min_assets_per_label_date"] = 3
     cfg["labels"] = labels
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_label_run": False}  # test hygiene: no external logging
     return cfg
 
 
@@ -409,3 +410,29 @@ def test_no_labels_written_to_data_features_dir(tmp_path):
     _run_agent(tmp_path)
     feature_files = list((tmp_path / "data" / "features").glob("*.parquet"))
     assert not any("label" in p.name for p in feature_files)
+
+
+def test_manifest_has_data_content_hash(tmp_path):
+    _write_upstream(tmp_path, symbols=["BTC", "ETH", "SOL", "UNI"])
+    _run_agent(tmp_path)
+    *_rest, manifest = _read_outputs(tmp_path)
+    h = manifest.get("data_content_hash")
+    assert isinstance(h, str) and len(h) == 16  # deterministic 16-hex SHA-256 fingerprint
+
+
+def test_content_hash_deterministic_and_order_independent(tmp_path):
+    agent = LabelAgent(_cfg(tmp_path))
+    df = pd.DataFrame({
+        "date_ts": pd.to_datetime(["2026-03-01", "2026-03-01"], utc=True),
+        "symbol": ["BTC", "ETH"], "f1": [0.1, 0.2], "label_fwd_logret_7d": [0.01, 0.02],
+        "snapshot_id": ["s", "s"], "run_id": ["r", "r"], "created_at_utc": ["t", "t"],
+    })
+    h1 = agent._content_hash(df)
+    h2 = agent._content_hash(df.iloc[::-1].reset_index(drop=True))
+    assert h1 and len(h1) == 16 and h1 == h2          # order-independent
+    # provenance columns excluded -> changing them does not change the hash
+    df2 = df.copy(); df2["run_id"] = ["other", "other"]
+    assert agent._content_hash(df2) == h1
+    # a real feature change DOES change the hash
+    df3 = df.copy(); df3.loc[0, "f1"] = 0.99
+    assert agent._content_hash(df3) != h1

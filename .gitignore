@@ -11,20 +11,26 @@ logs/
 .ruff_cache/
 .ipynb_checkpoints/
 
-data/cache/
-data/*_smoke/
-data/backups/
-data/raw/
-data/cleaned/
-data/features/
-data/labels/
-data/predictions/
-data/allocations/
-data/backtests/
-data/reports/
+# Frontend local dependencies/build outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+/data/cache/
+/data/*_smoke/
+/data/backups/
+/data/raw/
+/data/cleaned/
+/data/features/
+/data/labels/
+/data/predictions/
+/data/allocations/
+/data/backtests/
+/data/reports/
 
 metadata/*.db
 .env
 .env.*
-data/
+/data/
 repo_status_after_phase6.txt
+.universe_golden_ref/

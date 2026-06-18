@@ -102,6 +102,16 @@ def _safe_corr(a: pd.Series, b: pd.Series, method: str) -> Tuple[float, float]:
     return float(c) if pd.notna(c) else np.nan, float(p) if pd.notna(p) else np.nan
 
 
+def _md_table(df: pd.DataFrame, *, index: bool = False) -> str:
+    """Render a DataFrame as a Markdown table, degrading gracefully to a fixed-width text
+    table when the optional ``tabulate`` dependency is absent (graceful-degradation contract).
+    Never raises on a reporting nicety."""
+    try:
+        return df.to_markdown(index=index)
+    except Exception:
+        return df.to_string(index=index)
+
+
 class BaselineCrossSectionalMean:
     def fit(self, X: pd.DataFrame, y: pd.Series, symbols: pd.Series) -> "BaselineCrossSectionalMean":
         frame = pd.DataFrame({"symbol": symbols.values, "y": y.values})
@@ -126,6 +136,71 @@ class AlphaResearchAgent(AgentBase):
         self._feature_sets: Dict[str, List[str]] = {}
         self._warnings: List[str] = []
         self._skipped: List[Dict[str, Any]] = []
+
+    def _content_hash(self, df: Optional[pd.DataFrame]) -> str:
+        """Deterministic 16-hex fingerprint of the merged research panel (features + label
+        variants), order-independent and excluding provenance columns. Mirrors the other agents'
+        SHA-256 reproducibility guarantee — identical inputs yield an identical run fingerprint."""
+        if df is None or df.empty:
+            return ""
+        cols = [c for c in df.columns if c not in {"snapshot_id", "run_id", "created_at_utc"}]
+        sub = df[sorted(cols)].copy()
+        if "date_ts" in sub.columns:
+            sub["date_ts"] = pd.to_datetime(sub["date_ts"], utc=True)
+        sort_keys = [k for k in ["symbol", "date_ts"] if k in sub.columns]
+        if sort_keys:
+            sub = sub.sort_values(sort_keys)
+        return hashlib.sha256(sub.to_json(orient="records", date_format="iso").encode("utf-8")).hexdigest()[:16]
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any], leaderboard: pd.DataFrame) -> None:
+        """Log the alpha-research run to MLflow (params/metrics/tags/hash + artifacts). Non-fatal,
+        gated by mlflow.log_alpha_research_run."""
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_alpha_research_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow not available, skipping alpha-research logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(self._project_root / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"alpha_research_{self.run_id}"):
+                mlflow.set_tags({"agent": "AlphaResearchAgent", "run_id": self.run_id,
+                                 "snapshot_id": self.snapshot_id or "",
+                                 "data_content_hash": manifest.get("data_content_hash", ""),
+                                 "signal_only": str(manifest.get("signal_only", True)),
+                                 "research_status": "signal_only_no_alpha_authority"})
+                mlflow.log_params({k: manifest.get(k) for k in
+                                   ["experiments_run", "experiments_skipped", "signal_only",
+                                    "export_candidate_to_predictions"]
+                                   if manifest.get(k) is not None})
+                metrics = {k: float(self.metrics.get(k))
+                           for k in ["experiments_run", "experiments_skipped"]
+                           if self.metrics.get(k) is not None}
+                metrics["prediction_rows"] = float(manifest.get("prediction_rows", 0) or 0)
+                metrics["any_final_alpha_passed"] = float(bool(self.metrics.get("any_final_alpha_passed", False)))
+                if leaderboard is not None and not leaderboard.empty and "mean_rank_ic" in leaderboard.columns:
+                    best_ic = pd.to_numeric(leaderboard["mean_rank_ic"], errors="coerce").dropna()
+                    if not best_ic.empty:
+                        metrics["best_mean_rank_ic"] = float(best_ic.max())
+                mlflow.log_metrics(metrics)
+                if mlcfg.get("log_artifacts", True):
+                    for path in [self._output_dir / "research_manifest.json",
+                                 self._output_dir / "research_leaderboard.parquet",
+                                 self._output_dir / "alpha_research_report.md"]:
+                        try:
+                            if path.exists():
+                                mlflow.log_artifact(str(path))
+                        except Exception:  # pragma: no cover
+                            pass
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow alpha-research logging failed (non-fatal): {exc}")
 
     def prepare(self) -> None:
         cfg = self._cfg = self.cfg.get("alpha_research", {})
@@ -687,6 +762,7 @@ class AlphaResearchAgent(AgentBase):
         return {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(self._panel),
             "created_at_utc": _utcnow_iso(),
             "experiments_run": int(len(lb)),
             "experiments_skipped": int(len(self._skipped)),
@@ -710,7 +786,7 @@ class AlphaResearchAgent(AgentBase):
         if passed == 0:
             lines.append("No robust alpha found under tested configurations.")
         if not best.empty:
-            lines.extend(["", "## Best Experiments", "", best.head(20).to_markdown(index=False)])
+            lines.extend(["", "## Best Experiments", "", _md_table(best.head(20))])
         return "\n".join(lines) + "\n"
 
     def persist(self, result: Dict[str, Any]) -> None:
@@ -740,6 +816,7 @@ class AlphaResearchAgent(AgentBase):
             "alpha_model_leaderboard": str(self._pred_dir / "alpha_model_leaderboard.parquet"),
             "alpha_feature_importance": str(self._pred_dir / "alpha_feature_importance.parquet"),
         }
+        self._log_to_mlflow(result["manifest"], result.get("leaderboard", pd.DataFrame()))
 
     def _validate_before_persist(self, result: Dict[str, Any]) -> None:
         lb = result.get("leaderboard", pd.DataFrame())

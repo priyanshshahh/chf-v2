@@ -107,6 +107,8 @@ class FeatureAgent(AgentBase):
         self.onchain_snapshot_id: str = ""
         self.warnings: List[str] = []
         self.limitations: List[str] = []
+        self.membership_mode: str = str(self.fcfg.get("membership_mode", "latest_snapshot")).lower()
+        self._member_pairs: set = set()
 
     def _resolve_dir(self, raw_path: str) -> Path:
         path = Path(raw_path)
@@ -116,6 +118,64 @@ class FeatureAgent(AgentBase):
 
     def _now_utc(self) -> pd.Timestamp:
         return pd.Timestamp.now(tz="UTC")
+
+    def _content_hash(self, full_features: pd.DataFrame) -> str:
+        """Deterministic 16-hex fingerprint of the feature panel (symbol, date_ts, all features).
+
+        Mirrors Market/OnChain content hashing so identical inputs produce an identical,
+        auditable fingerprint regardless of wall-clock — the blueprint's SHA-256 reproducibility.
+        """
+        if full_features is None or full_features.empty:
+            return ""
+        feat_cols = self._feature_columns(full_features)
+        cols = ["symbol", "date_ts"] + sorted(feat_cols)
+        cols = [c for c in cols if c in full_features.columns]
+        if "symbol" not in cols or "date_ts" not in cols:
+            return ""
+        sub = full_features[cols].copy()
+        sub["date_ts"] = ensure_utc(sub["date_ts"])
+        sub = sub.sort_values(["symbol", "date_ts"])
+        import hashlib
+        return hashlib.sha256(sub.to_json(orient="records", date_format="iso").encode("utf-8")).hexdigest()[:16]
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any], artifact_paths: List[Path]) -> None:
+        """Log the feature run to MLflow (params/metrics/tags/hash + artifacts). Non-fatal,
+        gated by mlflow.log_feature_run."""
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_feature_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow not available, skipping feature logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(Path(self.cfg["_project_root"]) / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"features_{self.run_id}"):
+                mlflow.set_tags({"agent": "FeatureAgent", "run_id": self.run_id,
+                                 "snapshot_id": self.snapshot_id or "",
+                                 "membership_mode": self.membership_mode,
+                                 "data_content_hash": manifest.get("data_content_hash", "")})
+                mlflow.log_params({k: manifest.get(k) for k in
+                                   ["onchain_lag_days", "final_kept_feature_count", "full_feature_count"]
+                                   if manifest.get(k) is not None})
+                mlflow.log_metrics({k: float(manifest.get(k, 0) or 0) for k in
+                                    ["market_rows", "onchain_rows", "full_rows", "market_symbols",
+                                     "onchain_symbols", "full_symbols", "final_kept_feature_count"]})
+                if mlcfg.get("log_artifacts", True):
+                    for art in artifact_paths:
+                        try:
+                            if art and Path(art).exists():
+                                mlflow.log_artifact(str(art))
+                        except Exception:  # pragma: no cover
+                            pass
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow feature logging failed (non-fatal): {exc}")
 
     def prepare(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -160,9 +220,68 @@ class FeatureAgent(AgentBase):
             return con.execute(f"SELECT {selected} FROM read_parquet('{path}')").df()
         return pd.read_parquet(path, columns=columns)
 
+    def _membership_daily_path(self) -> Path:
+        return self._resolve_dir(
+            self.fcfg.get("membership_daily_path", "data/raw/universe/universe_membership_daily.parquet")
+        )
+
+    def _load_pit_membership(self, universe: pd.DataFrame) -> Tuple[List[str], str]:
+        """PIT mode: allowed symbols = union of all daily members; store member (date,symbol) pairs.
+
+        Features are later computed over the full panel and then masked to member rows
+        only, so the model trades each coin only on days it was actually a top-N member
+        (survivorship-free). Falls back to latest-snapshot if the mask is absent and
+        ``require_pit_membership`` is not set.
+        """
+        mpath = self._membership_daily_path()
+        if not mpath.exists():
+            if self.fcfg.get("require_pit_membership", False):
+                raise FeatureAgentError(
+                    f"membership_mode=pit_daily but daily mask missing: {mpath}. "
+                    "Run scripts/build_membership_daily.py first."
+                )
+            self.membership_mode = "latest_snapshot"
+            self.limitations.append(
+                f"membership_mode=pit_daily requested but mask missing ({mpath}); fell back to latest_snapshot."
+            )
+            return self._load_latest_snapshot_symbols(universe)
+        mask = pd.read_parquet(mpath, columns=["date_ts", "symbol"])
+        mask["date_ts"] = ensure_utc(mask["date_ts"]).dt.normalize()
+        mask["symbol"] = mask["symbol"].astype(str).str.upper()
+        symbols = sorted(mask["symbol"].dropna().unique().tolist())
+        max_symbols = self.fcfg.get("max_symbols")
+        if max_symbols:
+            top = set(mask["symbol"].value_counts().head(int(max_symbols)).index)
+            symbols = [s for s in symbols if s in top]
+            mask = mask[mask["symbol"].isin(top)].copy()
+        self._member_pairs = set(zip(mask["date_ts"], mask["symbol"]))
+        if not symbols:
+            raise FeatureAgentError("PIT membership produced no symbols for feature generation")
+        self.limitations.append(
+            f"Feature generation uses survivorship-free PIT daily membership: {len(symbols)} unique members, "
+            f"{len(self._member_pairs)} (date,symbol) member rows."
+        )
+        return symbols, f"pit_daily:{len(self._member_pairs)}"
+
+    def _load_latest_snapshot_symbols(self, universe: pd.DataFrame) -> Tuple[List[str], str]:
+        latest_snapshot = universe["snapshot_date"].max()
+        latest = universe[(universe["snapshot_date"] == latest_snapshot) & (universe["is_eligible"] == True)].copy()  # noqa: E712
+        latest["symbol"] = latest["symbol"].astype(str).str.upper()
+        latest = latest.sort_values(["market_cap_rank", "symbol"])
+        max_symbols = self.fcfg.get("max_symbols")
+        if max_symbols:
+            latest = latest.head(int(max_symbols)).copy()
+        symbols = latest["symbol"].tolist()
+        if not symbols:
+            raise FeatureAgentError("Universe intersection produced no symbols for feature generation")
+        snapshot_id = str(latest["snapshot_id"].iloc[0]) if "snapshot_id" in latest.columns and not latest.empty else ""
+        return symbols, snapshot_id
+
     def _load_allowed_symbols(self) -> Tuple[List[str], str]:
         universe = self._read_parquet(self.universe_input_path)
         universe["snapshot_date"] = ensure_utc(universe["snapshot_date"])
+        if self.membership_mode == "pit_daily":
+            return self._load_pit_membership(universe)
         membership_path = self._resolve_dir("data/raw/universe/universe_membership.parquet")
         survivor_only = self.universe_manifest.get("survivor_only_universe")
         if survivor_only is False:
@@ -241,6 +360,10 @@ class FeatureAgent(AgentBase):
         full_features["run_id"] = self.run_id
         full_features["created_at_utc"] = self._now_utc().isoformat()
 
+        market_features = self._apply_membership_filter(market_features)
+        onchain_features = self._apply_membership_filter(onchain_features)
+        full_features = self._apply_membership_filter(full_features)
+
         market_features = self._drop_all_null_features(market_features, "market")
         onchain_features = self._drop_all_null_features(onchain_features, "onchain")
         full_features = self._drop_all_null_features(full_features, "full")
@@ -292,6 +415,23 @@ class FeatureAgent(AgentBase):
             "fatal_errors": fatal_errors,
         }
 
+    def _apply_membership_filter(self, df: pd.DataFrame) -> pd.DataFrame:
+        """In pit_daily mode, keep only (date_ts, symbol) rows that were universe members.
+
+        Features are computed over the full panel (so rolling windows see real pre-membership
+        history), then this masks the emitted rows down to actual member days — the model
+        therefore only ever sees a coin on days it was a genuine top-N member. No-op in
+        latest_snapshot mode or when no member pairs are loaded.
+        """
+        if self.membership_mode != "pit_daily" or not self._member_pairs:
+            return df
+        if df.empty:
+            return df
+        dts = ensure_utc(df["date_ts"]).dt.normalize()
+        syms = df["symbol"].astype(str).str.upper()
+        keep = [(d, s) in self._member_pairs for d, s in zip(dts, syms)]
+        return df[pd.Series(keep, index=df.index)].copy()
+
     def _build_market_features(self, market: pd.DataFrame) -> pd.DataFrame:
         windows = self.fcfg.get("market_windows", {})
         market = market.sort_values(["symbol", "date_ts"]).copy()
@@ -312,6 +452,12 @@ class FeatureAgent(AgentBase):
             high = grp["high"]
             low = grp["low"]
             volume = grp["volume"]
+            # Phase 3: synthetic (forward-filled) bars have fabricated high=low=close, not
+            # real intraday range. Exclude them from range/ATR features by nulling H/L there.
+            if "is_synthetic_ohlc" in grp.columns:
+                synth = grp["is_synthetic_ohlc"].fillna(False).astype(bool)
+                high = high.where(~synth)
+                low = low.where(~synth)
             grp["log_ret_1d"] = safe_log_ratio(close, close.shift(1))
             for window in windows.get("returns", [1, 3, 7, 14, 30, 60, 90]):
                 grp[f"log_ret_{window}d"] = safe_log_ratio(close, close.shift(window))
@@ -327,7 +473,14 @@ class FeatureAgent(AgentBase):
             grp["price_sma_gap_14d"] = (close / sma14) - 1
             grp["price_sma_gap_30d"] = (close / sma30) - 1
             grp["zscore_close_30d"] = rolling_zscore(close, 30, min_periods=15)
-            grp["dollar_volume"] = close * volume
+            # Phase 2: prefer the unit-correct USD dollar-volume from MarketDataAgent
+            # (handles base-unit exchange volume vs already-USD aggregator volume). Fall
+            # back to close*volume for legacy market files that lack the column.
+            if "dollar_volume_usd" in grp.columns:
+                dv_usd = pd.to_numeric(grp["dollar_volume_usd"], errors="coerce")
+                grp["dollar_volume"] = dv_usd.where(dv_usd.notna(), close * volume)
+            else:
+                grp["dollar_volume"] = close * volume
             grp["log_dollar_volume"] = np.log(grp["dollar_volume"].where(grp["dollar_volume"] > 0))
             vol_mean_7 = volume.rolling(window=7, min_periods=4).mean()
             vol_mean_30 = volume.rolling(window=30, min_periods=15).mean()
@@ -357,7 +510,12 @@ class FeatureAgent(AgentBase):
             )
             grp["beta_btc_60d"] = beta.values
             grp["corr_btc_60d"] = corr.values
-            grp["is_forward_filled_market"] = grp.get("is_forward_filled", False).astype(bool)
+            # Column-presence-safe: grp.get(...) returns a scalar False if the column is
+            # absent, on which .astype would raise — guard explicitly.
+            if "is_forward_filled" in grp.columns:
+                grp["is_forward_filled_market"] = grp["is_forward_filled"].fillna(False).astype(bool)
+            else:
+                grp["is_forward_filled_market"] = False
             grp["market_data_available"] = True
             grp["market_history_days_available"] = np.arange(1, len(grp) + 1)
             all_rows.append(grp)
@@ -730,6 +888,8 @@ class FeatureAgent(AgentBase):
         manifest = {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(full_features),
+            "membership_mode": self.membership_mode,
             "created_at_utc": self._now_utc().isoformat(),
             "input_files": {
                 "market": str(self.market_input_path),
@@ -796,6 +956,8 @@ class FeatureAgent(AgentBase):
             json.dump(manifest, f, indent=2)
 
         self.output_paths.update({k: v for k, v in manifest["output_files"].items() if v})
+        self._log_to_mlflow(manifest, [manifest_path, quality_path, keep_list_path])
+
     def _write_partitioned(self, partition_root: Path, market_features: pd.DataFrame, full_features: pd.DataFrame) -> None:
         for label, df in [("market", market_features), ("full", full_features)]:
             if df.empty:

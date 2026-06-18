@@ -35,6 +35,7 @@ def _cfg(tmp_path: Path) -> dict:
     onchain["blockchair"]["enabled"] = False
     onchain["dune"]["enabled"] = False
     cfg["onchain"] = onchain
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_onchain_run": False}  # test hygiene: no external logging
     return cfg
 
 

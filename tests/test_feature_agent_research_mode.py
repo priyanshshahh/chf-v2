@@ -25,6 +25,7 @@ def _cfg(tmp_path: Path) -> dict:
     features["min_rows_required"] = 50
     features["pruning"]["enabled"] = True
     cfg["features"] = features
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_feature_run": False}  # test hygiene: no external logging
     return cfg
 
 

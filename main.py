@@ -331,6 +331,22 @@ def cmd_universe(args):
     print(f"[universe] Done. Output: {agent.output_paths}")
 
 
+def cmd_membership(args):
+    """Build the daily point-in-time membership mask from universe_monthly.parquet."""
+    from configs.config import resolve_path
+    from scripts.build_membership_daily import write_membership_daily
+    cfg = _command_cfg(args)
+    uni = resolve_path(cfg, "raw") / "universe" / "universe_monthly.parquet"
+    out = resolve_path(cfg, "raw") / "universe" / "universe_membership_daily.parquet"
+    if not uni.exists():
+        print("[membership] ERROR: universe_monthly.parquet missing. Run 'python main.py universe' first.")
+        sys.exit(1)
+    end_date = cfg.get("universe", {}).get("end_date") or None
+    manifest = write_membership_daily(uni, out, end_date=end_date)
+    print(f"[membership] Done. rows={manifest['rows']} cmc_ids={manifest['unique_cmc_id']} "
+          f"span={manifest['date_min']}..{manifest['date_max']} -> {out}")
+
+
 def cmd_market(args):
     from agents.market_data_agent import MarketDataAgent
     cfg = _command_cfg(args)
@@ -555,6 +571,7 @@ def main():
         return p
 
     add_stage_parser("universe", "Run UniverseAgent")
+    add_stage_parser("membership", "Build daily PIT membership mask from universe_monthly")
     add_stage_parser("market", "Run MarketDataAgent")
     add_stage_parser("onchain", "Run OnChainAgent")
     add_stage_parser("features", "Run FeatureAgent")
@@ -574,6 +591,7 @@ def main():
 
     commands = {
         "universe": cmd_universe,
+        "membership": cmd_membership,
         "market": cmd_market,
         "onchain": cmd_onchain,
         "features": cmd_features,

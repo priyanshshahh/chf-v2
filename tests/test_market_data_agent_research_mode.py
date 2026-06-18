@@ -34,6 +34,7 @@ def _cfg(tmp_path: Path) -> dict:
     universe.update(cfg["universe_dev"])
     universe["output_dir"] = "data/raw/universe"
     cfg["universe"] = universe
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_market_run": False}  # test hygiene: no external logging
     return cfg
 
 

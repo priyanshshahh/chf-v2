@@ -18,10 +18,22 @@ All features are computed with **no look-ahead**: at time `t`, only data availab
 | `high` | float64 | Intraday high price in USD |
 | `low` | float64 | Intraday low price in USD |
 | `close` | float64 | Closing price in USD |
-| `volume` | float64 | 24h trading volume in USD |
+| `volume` | float64 | Raw daily volume **in the source's native units** — BASE-asset units for exchange (CCXT) sources, USD for aggregator sources. Do not use directly across assets; use `dollar_volume_usd`. |
+| `dollar_volume_usd` | float64 | Canonical USD dollar-volume, unit-correct per source (`volume*close` for base sources, `volume` for USD sources). Use this for all cross-asset liquidity features. |
+| `volume_basis` | str | Volume unit basis of the source: `base`, `quote_usd`, or `none`. |
+| `is_synthetic_ohlc` | bool | True on forward-filled gap days where O/H/L are carried-forward fabrications (close is a real mark-to-market carry). Range/ATR features exclude these rows. |
+| `is_price_anomaly` | bool | True on spike-and-revert bars (bad print): move in and out both exceed `max_abs_daily_log_return` with opposite sign. Sustained large moves are NOT flagged. |
+| `price_basis` | str | Price definition of the source: `venue_close` (single exchange) or `composite_index` (aggregator). Do not compare returns across bases blindly. |
+| `has_long_gap` | bool | True when the asset had a >max-gap discontinuity and `segment_and_flag` kept only its most-recent contiguous segment. |
+| `volume_scope` | str | Whether reported volume is `single_venue` (exchange) or `global` (aggregator). Same unit as `dollar_volume_usd` but a different quantity — don't mix blindly across assets. |
+| `is_stale_price` | bool | True on genuinely stale (frozen-feed) bars — a run of an identical REAL close longer than `max_flat_close_days` (forward-filled synthetic flats are excluded). |
+| `is_universe_member` | bool | (PIT mode) True only on days the asset was a real top-N universe member. |
+| `market_cap_rank` | int | (PIT mode) Universe market-cap rank on that date, from the daily membership mask. |
 | `snapshot_id` | str | SHA-256 run identifier |
 
-Source: Binance via CCXT. Hive-partitioned by year and month.
+Source: Coinbase / Kraken / KuCoin / Gemini via CCXT (USD/USDC quotes; **Binance is forbidden**),
+with keyless fallbacks (CryptoCompare, CoinGecko, CoinCap, CoinPaprika). Written as a flat
+`market_ohlcv.parquet` plus `by_symbol/` files. (Hive partitioning is a planned Phase 6 addition.)
 
 ### 1.2 Universe (`data/raw/universe/universe_YYYYMM.parquet`)
 

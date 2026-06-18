@@ -188,6 +188,47 @@ class DuckDBEngine:
 
         return report
 
+    def create_market_views(self) -> List[str]:
+        """Phase 6: register persistent DuckDB views over the market lake.
+
+        Lets downstream/dashboard query ``v_market_ohlcv`` (the flat canonical file) and
+        ``v_market_members`` (PIT member rows only) by view name instead of hardcoded
+        Parquet paths. Returns the list of views created. No-op if the market file is
+        absent. Prefers the Hive-partitioned dataset for filter-pushdown when present.
+        """
+        market_dir = self._resolve("raw") / "market"
+        flat = market_dir / "market_ohlcv.parquet"
+        partitioned = market_dir / "partitioned"
+        if not flat.exists():
+            return []
+        conn = self._get_conn()
+        created: List[str] = []
+        # Base view over the canonical flat file (stable schema downstream depends on).
+        conn.execute(
+            f"CREATE OR REPLACE VIEW v_market_ohlcv AS "
+            f"SELECT * FROM read_parquet('{flat.as_posix()}')"
+        )
+        created.append("v_market_ohlcv")
+        # Partition-pushdown view (hive_partitioning) when the partitioned tree exists.
+        if partitioned.exists():
+            conn.execute(
+                f"CREATE OR REPLACE VIEW v_market_ohlcv_partitioned AS "
+                f"SELECT * FROM read_parquet('{(partitioned / '**' / '*.parquet').as_posix()}', hive_partitioning=true)"
+            )
+            created.append("v_market_ohlcv_partitioned")
+        # Member-only view (gracefully degrades if the PIT column is absent).
+        try:
+            cols = conn.execute("SELECT * FROM v_market_ohlcv LIMIT 0").df().columns
+            if "is_universe_member" in cols:
+                conn.execute(
+                    "CREATE OR REPLACE VIEW v_market_members AS "
+                    "SELECT * FROM v_market_ohlcv WHERE is_universe_member = TRUE"
+                )
+                created.append("v_market_members")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"v_market_members not created: {exc}")
+        return created
+
     def query(self, sql: str) -> pd.DataFrame:
         """Execute arbitrary SQL against the DuckDB connection."""
         conn = self._get_conn()

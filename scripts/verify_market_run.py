@@ -142,6 +142,40 @@ def inspect_market_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     volume = market["volume"]
     if pd.to_numeric(volume, errors="coerce").dropna().lt(0).any():
         failures.append("volume contains negative values")
+    # Phase 2: canonical USD dollar-volume sanity (column-gated for legacy files).
+    if "volume_basis" in market.columns:
+        bad_basis = set(market["volume_basis"].dropna().astype(str).unique()) - {"base", "quote_usd", "none"}
+        if bad_basis:
+            failures.append(f"unknown volume_basis values: {sorted(bad_basis)}")
+    if "dollar_volume_usd" in market.columns:
+        if pd.to_numeric(market["dollar_volume_usd"], errors="coerce").dropna().lt(0).any():
+            failures.append("dollar_volume_usd contains negative values")
+    # Phase 3: synthetic forward-filled bars must be flagged AND forward-filled (consistency).
+    if "is_synthetic_ohlc" in market.columns and "is_forward_filled" in market.columns:
+        synth = market["is_synthetic_ohlc"].fillna(False).astype(bool)
+        ff = market["is_forward_filled"].fillna(False).astype(bool)
+        if (synth & ~ff).any():
+            failures.append("is_synthetic_ohlc=true on a row that is not forward-filled (inconsistent)")
+    # Phase 5: price-anomaly density (warning — flagged bad prints should be rare).
+    if "is_price_anomaly" in market.columns and len(market):
+        frac = market["is_price_anomaly"].fillna(False).astype(bool).mean()
+        if frac > 0.01:
+            warnings.append(f"price anomaly fraction is high: {frac:.3%} of rows flagged is_price_anomaly")
+    # Phase 8 (E): warn if any asset mixes price bases (venue close spliced with index close).
+    if "price_basis" in market.columns and "symbol" in market.columns:
+        per_sym = market.groupby("symbol")["price_basis"].nunique()
+        mixed = per_sym[per_sym > 1]
+        if len(mixed):
+            warnings.append(f"{len(mixed)} asset(s) mix price_basis within their series (e.g. {list(mixed.index[:5])})")
+    # Phase 9: volume_scope valid values; stale-price density (warning only).
+    if "volume_scope" in market.columns:
+        bad_scope = set(market["volume_scope"].dropna().astype(str).unique()) - {"single_venue", "global", "unknown"}
+        if bad_scope:
+            failures.append(f"unknown volume_scope values: {sorted(bad_scope)}")
+    if "is_stale_price" in market.columns and len(market):
+        frac = market["is_stale_price"].fillna(False).astype(bool).mean()
+        if frac > 0.05:
+            warnings.append(f"stale-price fraction is high: {frac:.3%} of rows flagged is_stale_price (frozen feeds?)")
     if market.duplicated(["symbol", "date_ts"]).any():
         failures.append("duplicate symbol + date_ts rows found")
     if cmc_mode and market.duplicated(["cmc_id", "date_ts"]).any():
@@ -150,7 +184,7 @@ def inspect_market_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         failures.append("binance exchange detected")
     if market["source"].astype(str).str.contains("binance", case=False).any():
         failures.append("binance source detected")
-    if market["exchange_symbol"].astype(str).str.contains("USDT", case=False).any():
+    if not bool(mcfg.get("allow_usdt_fallback", False)) and market["exchange_symbol"].astype(str).str.contains("USDT", case=False).any():
         failures.append("USDT exchange symbol detected")
 
     min_assets = int(mcfg.get("minimum_assets_required", 1))
@@ -173,6 +207,9 @@ def inspect_market_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         failures.append("manifest missing output_files")
     if "failed_assets" not in manifest:
         failures.append("manifest missing failed_assets")
+    # Phase 4: determinism provenance (warning-level; legacy manifests predate these).
+    if not market.empty and not manifest.get("data_content_hash"):
+        warnings.append("manifest missing data_content_hash (re-run market stage to populate)")
     if cmc_mode:
         if "cmc_id" not in market.columns or market["cmc_id"].isna().any():
             failures.append("cmc market rows missing cmc_id")
@@ -183,6 +220,20 @@ def inspect_market_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             failures.append("current-day incomplete candle detected")
         if int(manifest.get("lookback_days") or 0) < 1095:
             failures.append("manifest lookback_days < 1095 for CMC mode")
+
+    # --- Phase 1: point-in-time universe membership checks (gated) ---
+    if bool(mcfg.get("attach_membership_mask", False)):
+        if "is_universe_member" not in market.columns:
+            failures.append("attach_membership_mask=true but is_universe_member column missing")
+        elif market["is_universe_member"].notna().sum() == 0:
+            failures.append("attach_membership_mask=true but is_universe_member is entirely null")
+    if str(mcfg.get("universe_membership_mode", "latest_snapshot")).lower() == "union_full_history":
+        months = pd.to_datetime(market["date_ts"], utc=True).dt.to_period("M").nunique()
+        if months < 2:
+            failures.append(
+                f"union_full_history mode but market panel spans only {months} month(s) "
+                "(survivorship collapse not resolved)"
+            )
     return failures, warnings
 
 

@@ -25,6 +25,7 @@ def _cfg(tmp_path: Path) -> dict:
     modeling["walk_forward"]["min_test_symbols"] = 3
     modeling["min_assets_per_prediction_date"] = 3
     cfg["modeling"] = modeling
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_model_run": False}  # test hygiene: no external logging
     return cfg
 
 
@@ -223,3 +224,57 @@ def test_model_records_failed_combinations_without_crashing(tmp_path):
     _write_model_inputs(tmp_path)
     cfg["modeling"]["feature_sets"] = ["onchain_only"]
     assert ModelAgent(cfg).execute(max_retries=1)
+
+
+def test_content_hash_deterministic_and_sensitive(tmp_path):
+    import pandas as pd
+    from agents.model_agent import ModelAgent
+    agent = ModelAgent(_cfg(tmp_path))
+    agent._dataset = pd.DataFrame({
+        "date_ts": pd.to_datetime(["2026-03-01", "2026-03-01"], utc=True),
+        "symbol": ["BTC", "ETH"], "f1": [0.1, 0.2], "label_fwd_logret_7d": [0.01, 0.02],
+        "snapshot_id": ["s", "s"], "run_id": ["r", "r"],
+    })
+    h1 = agent._content_hash()
+    h2 = agent._content_hash()
+    assert h1 and len(h1) == 16 and h1 == h2          # deterministic
+    agent._dataset.loc[0, "f1"] = 0.11
+    assert agent._content_hash() != h1                # sensitive to feature change
+    # snapshot_id/run_id are excluded from the hash (provenance, not content)
+    agent._dataset.loc[0, "f1"] = 0.1
+    agent._dataset["run_id"] = ["other", "other"]
+    assert agent._content_hash() == h1
+
+
+def test_random_forest_emits_shap_feature_importance(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["modeling"]["model_names"] = ["random_forest"]
+    cfg["modeling"]["feature_sets"] = ["market_only"]
+    cfg["modeling"]["compute_shap"] = True
+    cfg["modeling"]["shap_max_samples"] = 500
+    _write_model_inputs(tmp_path)
+    assert ModelAgent(cfg).execute(max_retries=1)
+    fi = pd.read_parquet(tmp_path / "data" / "predictions" / "feature_importance.parquet")
+    assert {"importance", "mean_abs_shap", "importance_type", "shap_folds"}.issubset(fi.columns)
+    rf = fi[fi["model_name"] == "random_forest"]
+    assert not rf.empty
+    # SHAP actually populated (TreeExplainer ran on >=1 fold) and |SHAP| is non-negative
+    assert (rf["shap_folds"] > 0).all()
+    assert rf["mean_abs_shap"].notna().any()
+    assert (rf["mean_abs_shap"].dropna() >= 0).all()
+
+
+def test_shap_can_be_disabled(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["modeling"]["model_names"] = ["random_forest"]
+    cfg["modeling"]["feature_sets"] = ["market_only"]
+    cfg["modeling"]["compute_shap"] = False
+    _write_model_inputs(tmp_path)
+    assert ModelAgent(cfg).execute(max_retries=1)
+    fi = pd.read_parquet(tmp_path / "data" / "predictions" / "feature_importance.parquet")
+    rf = fi[fi["model_name"] == "random_forest"]
+    assert not rf.empty
+    # disabled -> native impurity importance still present, SHAP null and no folds
+    assert rf["importance"].notna().any()
+    assert (rf["shap_folds"] == 0).all()
+    assert rf["mean_abs_shap"].isna().all()

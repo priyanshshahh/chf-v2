@@ -40,12 +40,35 @@ class PipelineRunner:
         self._results: Dict[str, bool] = {}
 
     def run_universe(self, snapshot_date: Optional[str] = None) -> bool:
-        """Run UniverseAgent."""
+        """Run UniverseAgent, then build the daily PIT membership mask."""
         from agents.universe_agent import UniverseAgent
         agent = UniverseAgent(self.cfg, snapshot_date=snapshot_date)
         success = agent.execute(max_retries=1)
         self._results["universe"] = success
+        if success:
+            self.build_membership_daily()
         return success
+
+    def build_membership_daily(self) -> bool:
+        """Expand monthly universe membership into the daily PIT mask (non-fatal)."""
+        try:
+            from configs.config import resolve_path
+            from scripts.build_membership_daily import write_membership_daily
+
+            uni = resolve_path(self.cfg, "raw") / "universe" / "universe_monthly.parquet"
+            out = resolve_path(self.cfg, "raw") / "universe" / "universe_membership_daily.parquet"
+            if not uni.exists():
+                logger.warning("membership build skipped: universe_monthly.parquet missing")
+                self._results["membership_daily"] = False
+                return False
+            end_date = self.cfg.get("universe", {}).get("end_date") or None
+            write_membership_daily(uni, out, end_date=end_date)
+            self._results["membership_daily"] = True
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"membership build failed (non-fatal): {exc}")
+            self._results["membership_daily"] = False
+            return False
 
     def validate_universe_outputs(self) -> bool:
         """Validate research universe artifacts before downstream stages."""

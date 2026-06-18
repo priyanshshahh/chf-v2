@@ -1,5 +1,31 @@
 # CoinMarketCap Historical Access Limitation
 
+## ✅ RESOLVED — survivorship-free PIT achieved via the keyless public data-API
+
+The Pro-API limitations below are still accurate, but the requirement is now met by a
+verified alternative source (the second unblock option in §"Requirement To Unblock").
+
+CoinMarketCap's **public, keyless** data-API that powers `coinmarketcap.com/historical`
+returns the true Top-N ranking **as of any date back to 2013-05-05, including
+since-delisted/inactive coins**:
+
+```
+GET https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listings/historical?date=YYYY-MM-DD&start=1&limit=1000&convert=USD
+```
+
+Each row carries `id` (stable cmc_id), `cmcRank`, `dateAdded` (point-in-time maturity),
+category `tags`, `numMarketPairs`, and a point-in-time `quote` (price/marketCap/volume).
+Verified point-in-time-accurate (BTC market cap $546B on 2021-01-01; LTC #2 in 2014).
+
+This is ingested by `scripts/build_cmc_web_history.py` and consumed by the unified
+`UniverseAgent` via `source: cmc_web_pit`. The production universe is therefore now
+**survivorship-bias-free over 2021-01 → present (66 monthly snapshots, top-100)**, no
+key and no plan upgrade required. `professor_historical_universe_ready=true` for this
+source. The Pro `listings/historical` endpoint remains 400-blocked on the Hobbyist plan
+(facts below), but it is no longer the only path.
+
+---
+
 ## Current Probe Result
 
 The runtime can see a CoinMarketCap API key, but the current plan does not provide the historical access needed for a three-year point-in-time universe.

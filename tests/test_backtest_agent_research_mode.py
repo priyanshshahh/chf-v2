@@ -23,6 +23,7 @@ def _cfg(tmp_path: Path) -> dict:
     btcfg["market_path"] = "data/raw/market/market_ohlcv.parquet"
     btcfg["output_dir"] = "data/backtests"
     cfg["backtesting"] = btcfg
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_backtest_run": False}  # test hygiene: no external logging
     return cfg
 
 
@@ -315,3 +316,56 @@ def test_verify_backtest_rejects_absurd_equal_weight_daily_return(tmp_path):
 def test_benchmark_sanity_report_written(tmp_path):
     cfg, out_dir = _run(tmp_path)
     assert (out_dir / "benchmark_sanity_report.parquet").exists()
+
+
+def test_backtest_writes_data_content_hash(tmp_path):
+    cfg, out_dir = _run(tmp_path)
+    manifest = json.load(open(out_dir / "backtest_manifest.json"))
+    h = manifest.get("data_content_hash")
+    assert isinstance(h, str) and len(h) == 16  # deterministic 16-hex SHA-256 fingerprint
+
+
+def test_content_hash_deterministic_and_order_independent(tmp_path):
+    cfg = _cfg(tmp_path)
+    _write_inputs(tmp_path)
+    a1 = BacktestAgent(cfg)
+    a1.prepare()
+    h1 = a1._content_hash()
+    # Re-prepare a second agent on the same inputs -> identical fingerprint.
+    a2 = BacktestAgent(_cfg(tmp_path))
+    a2.prepare()
+    h2 = a2._content_hash()
+    assert h1 and h1 == h2
+    # Shuffling allocation row order must not change the hash.
+    a2._allocations = a2._allocations.sample(frac=1.0, random_state=7).reset_index(drop=True)
+    assert a2._content_hash() == h1
+
+
+def test_subperiod_performance_written_and_consistent(tmp_path):
+    cfg, out_dir = _run(tmp_path)
+    path = out_dir / "subperiod_performance.parquet"
+    assert path.exists()
+    sp = pd.read_parquet(path)
+    assert not sp.empty
+    assert {"subperiod", "strategy_name", "total_return", "sharpe", "max_drawdown", "n_days"}.issubset(sp.columns)
+    # full_period must be present and cover the most days of any segment for a given strategy.
+    assert "full_period" in set(sp["subperiod"])
+    one = sp[sp["strategy_name"] == "top_5_equal_weight"]
+    full_days = int(one[one["subperiod"] == "full_period"]["n_days"].iloc[0])
+    seg_days = one[one["subperiod"] != "full_period"]["n_days"]
+    if not seg_days.empty:
+        assert full_days >= int(seg_days.max())
+    # drawdowns are valid (<= 0, >= -1) on every subperiod row.
+    dd = pd.to_numeric(sp["max_drawdown"], errors="coerce")
+    assert (dd <= 1e-9).all() and (dd >= -1.0 - 1e-9).all()
+
+
+def test_subperiod_analysis_can_be_disabled(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["backtesting"]["subperiod_analysis"] = False
+    _write_inputs(tmp_path)
+    assert BacktestAgent(cfg).execute(max_retries=1)
+    out_dir = tmp_path / "data" / "backtests"
+    # disabled -> file is not written, and verifier still passes (it is an optional output).
+    assert not (out_dir / "subperiod_performance.parquet").exists()
+    assert validate_backtest_outputs(cfg) == []

@@ -108,6 +108,68 @@ class ModelAgent(AgentBase):
         self._warnings: List[str] = []
         self._failures: List[Dict[str, Any]] = []
 
+    def _content_hash(self) -> str:
+        """Deterministic 16-hex fingerprint of the modeling dataset (date_ts, symbol, labels +
+        features). Mirrors the other agents' content hashing — the blueprint's SHA-256
+        reproducibility guarantee, so an identical dataset yields an identical run fingerprint."""
+        if self._dataset is None or self._dataset.empty:
+            return ""
+        cols = [c for c in self._dataset.columns if c not in {"snapshot_id", "run_id", "created_at_utc",
+                "snapshot_id_label", "run_id_label", "created_at_utc_label"}]
+        sub = self._dataset[sorted(cols)].copy()
+        if "date_ts" in sub.columns:
+            sub["date_ts"] = pd.to_datetime(sub["date_ts"], utc=True)
+        sort_keys = [k for k in ["symbol", "date_ts"] if k in sub.columns]
+        if sort_keys:
+            sub = sub.sort_values(sort_keys)
+        import hashlib
+        return hashlib.sha256(sub.to_json(orient="records", date_format="iso").encode("utf-8")).hexdigest()[:16]
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any]) -> None:
+        """Log the model run to MLflow (params/metrics/tags/hash + artifacts). Non-fatal, gated
+        by mlflow.log_model_run."""
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_model_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow not available, skipping model logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(self._project_root / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"model_{self.run_id}"):
+                mlflow.set_tags({"agent": "ModelAgent", "run_id": self.run_id,
+                                 "snapshot_id": self.snapshot_id or "",
+                                 "data_content_hash": manifest.get("data_content_hash", ""),
+                                 "research_status": manifest.get("research_status", ""),
+                                 "alpha_status": manifest.get("alpha_status", "")})
+                mlflow.log_params({k: manifest.get(k) for k in
+                                   ["selected_model", "selected_feature_set", "selected_horizon_days", "embargo_days"]
+                                   if manifest.get(k) is not None})
+                metrics = {k: float(self.metrics.get(k, 0) or 0) for k in
+                           ["prediction_rows", "fold_count", "completed_runs"]}
+                if manifest.get("best_rank_ic") is not None:
+                    metrics["best_rank_ic"] = float(manifest["best_rank_ic"])
+                if manifest.get("best_rank_ic_tstat") is not None:
+                    metrics["best_rank_ic_tstat"] = float(manifest["best_rank_ic_tstat"])
+                mlflow.log_metrics(metrics)
+                if mlcfg.get("log_artifacts", True):
+                    for key in ["model_manifest", "model_leaderboard", "data_quality_model"]:
+                        art = self.output_paths.get(key)
+                        try:
+                            if art and Path(art).exists():
+                                mlflow.log_artifact(str(art))
+                        except Exception:  # pragma: no cover
+                            pass
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow model logging failed (non-fatal): {exc}")
+
     def prepare(self) -> None:
         cfg = self._model_cfg = self.cfg.get("modeling", {})
         input_path = _resolve(self._project_root, cfg.get("input_path", "data/labels/modeling_dataset.parquet"))
@@ -289,6 +351,36 @@ class ModelAgent(AgentBase):
             )
         raise ModelAgentError(f"unknown_model:{model_name}")
 
+    def _compute_shap_importance(self, model, X: pd.DataFrame) -> Optional[np.ndarray]:
+        """Mean(|SHAP value|) per feature via TreeExplainer — the blueprint's model-explainability
+        requirement. Deterministic (first-N rows, no sampling RNG), non-fatal, tree-models only.
+        Returns a per-feature vector aligned to ``X.columns`` (mean absolute SHAP across rows), or
+        ``None`` when disabled / unavailable / not applicable to the model type."""
+        if not self._model_cfg.get("compute_shap", True):
+            return None
+        if X is None or X.empty:
+            return None
+        try:
+            import shap
+        except Exception:  # pragma: no cover - shap optional
+            return None
+        try:
+            max_samples = int(self._model_cfg.get("shap_max_samples", 2000))
+            Xs = X.iloc[:max_samples] if 0 < max_samples < len(X) else X
+            explainer = shap.TreeExplainer(model)
+            values = explainer.shap_values(Xs, check_additivity=False)
+            if isinstance(values, list):  # multi-output explainers return a list
+                values = values[0]
+            arr = np.asarray(values, dtype=float)
+            if arr.ndim == 1:
+                arr = arr.reshape(1, -1)
+            if arr.shape[1] != X.shape[1]:
+                return None
+            return np.abs(arr).mean(axis=0)
+        except Exception as exc:  # pragma: no cover - explainer can reject some model types
+            self.logger.warning(f"SHAP computation skipped (non-fatal) for {type(model).__name__}: {exc}")
+            return None
+
     def _train_combination(self, *, panel: pd.DataFrame, label_col: str, horizon: int, feature_set: str, model_name: str, feature_cols: List[str]):
         wf = self._model_cfg.get("walk_forward", {})
         embargo_days = int(max(wf.get("embargo_days", 30), self._label_manifest.get("recommended_embargo_days", 30), horizon))
@@ -315,6 +407,7 @@ class ModelAgent(AgentBase):
         prediction_frames: List[pd.DataFrame] = []
         fold_rows: List[Dict[str, Any]] = []
         importances: List[np.ndarray] = []
+        shap_importances: List[np.ndarray] = []
         used_folds = 0
 
         for split in splits:
@@ -350,6 +443,9 @@ class ModelAgent(AgentBase):
                 pred = np.asarray(model.predict(X_test), dtype=float)
                 if hasattr(model, "feature_importances_"):
                     importances.append(np.asarray(model.feature_importances_, dtype=float))
+                shap_vec = self._compute_shap_importance(model, X_test)
+                if shap_vec is not None and shap_vec.shape[0] == len(feature_cols):
+                    shap_importances.append(shap_vec)
 
             fold_pred = test[["date_ts", "symbol"]].copy()
             fold_pred["model_name"] = model_name
@@ -430,7 +526,8 @@ class ModelAgent(AgentBase):
         fi_rows = []
         if importances:
             mean_importance = np.mean(np.vstack(importances), axis=0)
-            for feat, importance in zip(feature_cols, mean_importance):
+            mean_shap = np.mean(np.vstack(shap_importances), axis=0) if shap_importances else None
+            for idx, (feat, importance) in enumerate(zip(feature_cols, mean_importance)):
                 fi_rows.append(
                     {
                         "model_name": model_name,
@@ -438,6 +535,9 @@ class ModelAgent(AgentBase):
                         "horizon_days": horizon,
                         "feature_name": feat,
                         "importance": float(importance),
+                        "importance_type": "impurity",
+                        "mean_abs_shap": float(mean_shap[idx]) if mean_shap is not None else None,
+                        "shap_folds": int(len(shap_importances)),
                         "snapshot_id": self.snapshot_id,
                         "run_id": self.run_id,
                     }
@@ -519,6 +619,7 @@ class ModelAgent(AgentBase):
         return {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(),
             "created_at_utc": _utcnow_iso(),
             "modeling_dataset_path": self._model_cfg.get("input_path", "data/labels/modeling_dataset.parquet"),
             "label_manifest_path": "data/labels/label_manifest.json",
@@ -609,3 +710,5 @@ class ModelAgent(AgentBase):
         quality_path = pred_dir / "data_quality_model.md"
         quality_path.write_text(result["data_quality_md"])
         self.output_paths["data_quality_model"] = str(quality_path)
+
+        self._log_to_mlflow(manifest)

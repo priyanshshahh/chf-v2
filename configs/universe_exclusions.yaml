@@ -1,3 +1,14 @@
+# Universe exclusion configuration.
+#
+# Classification precedence (see agents/universe_agent.py::_classification_flags):
+#   1. EXACT category-tag-slug membership  (precise; CMC/CoinGecko tags)
+#   2. NAME whole-word match               (backstop, e.g. "Wrapped Bitcoin")
+#   3. SYMBOL denylist                     (exact-symbol backstop for tagless sources)
+# Substring-against-a-blob matching is intentionally NOT used: it caused PoS L1s
+# (ADA, NEAR — tagged "staking") and DEX tokens (HYPE — tagged "derivatives") to be
+# mis-flagged as LST/synthetic.
+
+# Exact-symbol backstop (used mainly for tagless sources like local datasets).
 denylist_symbols:
   - USDT
   - USDC
@@ -6,81 +17,89 @@ denylist_symbols:
   - TUSD
   - BUSD
   - USDE
+  - USDS
+  - USD1
+  - USDG
+  - USDD
   - PYUSD
+  - RLUSD
   - FRAX
   - LUSD
   - GUSD
-  - WBTC
-  - WETH
-  - STETH
-  - RETH
-  - CBETH
-  - JITOSOL
-  - MSOL
   - EURC
-  - PAXG
-  - XAUT
-  - USDT
-  - USDC
-  - DAI
-  - TUSD
-  - FDUSD
-  - PYUSD
-  - USDD
-  - USDE
   - EURT
   - EURS
+  - WBTC
+  - WETH
+  - WBNB
+  - WTRX
+  - CBBTC
+  - STETH
+  - WSTETH
+  - WBETH
+  - WEETH
+  - RETH
+  - CBETH
+  - RSETH
+  - JITOSOL
+  - BNSOL
+  - MSOL
+  - SFRXETH
+  - PAXG
+  - XAUT
   - DGX
 
-stable_keywords:
+# --- EXACT category-tag slugs (primary classifier) ---
+stablecoin_tags:
+  - stablecoin
+  - stablecoins
+  - usd-stablecoin
+  - eur-stablecoin
+  - fiat-stablecoin
+  - asset-backed-stablecoin
+  - algorithmic-stablecoin
+  - crypto-backed-stablecoin
+  - commodity-backed-stablecoin
+
+wrapped_tags:
+  - wrapped-tokens
+
+bridged_tags:
+  - bridged-tokens
+
+lst_tags:
+  - liquid-staking-tokens
+  - liquid-staking-derivatives
+  - liquid-restaking-tokens
+  - liquid-staking
+
+synthetic_tags:
+  # Specific asset-type slugs only. Generic 'tokenized-assets'/'tokenized-stock' are
+  # intentionally excluded: they appear as tagging noise on mega-cap coins (e.g.
+  # Chainlink carries a stray 'tokenized-stock' tag) and caused false positives.
+  - tokenized-gold
+  - tokenized-real-estate
+  - real-world-assets
+  - asset-backed-tokens
+  - rehypothecated-crypto
+
+# --- NAME whole-word backstops (matched against name tokens, not substrings) ---
+stable_name_words:
   - stablecoin
   - stable
-  - usd
-  - usdt
-  - usdc
-  - dai
-  - busd
-  - fdusd
-  - tusd
-  - usde
-  - frax
-  - lusd
-  - pyusd
-
-wrapped_keywords:
+wrapped_name_words:
   - wrapped
-  - wrapped bitcoin
-  - wrapped ether
-  - wbtc
-  - weth
-  - binance-peg
-  - pegged
-
-bridged_keywords:
+bridged_name_words:
   - bridged
   - bridge
-  - wormhole
-  - portal
-  - axelar
-  - axl
-
-lst_keywords:
+lst_name_words:
   - staked
-  - staking
-  - liquid staking
-  - steth
-  - reth
-  - cbeth
-  - jitosol
-  - msol
-  - sfrxeth
-
-synthetic_pegged_keywords:
+  - restaked
+synthetic_name_words:
   - synthetic
-  - pegged
-  - mirror
-  - derivative
+  - tokenized
 
+# Back-compat: legacy category_denylist (still honored as exact-tag membership).
 category_denylist:
   - stablecoins
   - usd-stablecoin

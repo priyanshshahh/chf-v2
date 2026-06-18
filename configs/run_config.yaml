@@ -27,10 +27,20 @@ universe:
   research_mode: true
   live_api_enabled: true
   use_fixtures: false
+  # Source resolution (unified agent). "auto" prefers the survivorship-free deep PIT
+  # dataset (cmc_web_pit) when present, else a local historical dataset, else live
+  # providers (latest snapshot). Explicit values: live_market | cmc_web_pit |
+  # cmc_listings_live | cmc_listings_download | local_dataset.
+  source: auto
+  cmc_web_dataset_path: "data/external/cmc_web/cmc_web_listings_historical.parquet"
+  asof_staleness_days: 40
+  min_market_pairs_for_tradability: 1
+  require_min_volume: true
   provider_priority:
+    # coincap removed: its free api.coincap.io/v2 endpoint is retired and
+    # rest.coincap.io/v3 now requires a key. CoinCapProvider remains for key holders.
     - coingecko
     - coinpaprika
-    - coincap
     - cryptocompare
   candidate_n: 500
   final_universe_n: 100
@@ -131,6 +141,54 @@ market_data:
   fail_on_empty_output: true
   fail_on_binance_usage: true
   fail_on_demo_data: true
+  # --- Point-in-time universe handoff (Phase 1) ---
+  # latest_snapshot  : legacy behavior — fetch only today's eligible survivors (survivorship-biased)
+  # union_full_history: fetch every coin ever eligible across all snapshots (survivorship-free)
+  universe_membership_mode: latest_snapshot
+  attach_membership_mask: false                 # join is_universe_member/market_cap_rank onto output
+  membership_daily_path: "data/raw/universe/universe_membership_daily.parquet"
+  require_pit_membership: false                 # hard-fail if union mode but mask missing (no silent survivor fallback)
+  # --- Determinism (Phase 4) ---
+  as_of_date: null                              # pin to e.g. "2026-03-24" for reproducible window + current-day cutoff
+  provider_cooldown_seconds: 60                 # bounded rate-limit cooldown (was: run-global blacklist)
+  # --- Price-anomaly guard (Phase 5, hardened in Phase 9) ---
+  max_abs_daily_log_return: 1.6094379124341003  # ln(5) ≈ +400%/day; both-legs-huge round trip
+  anomaly_secondary_log_return: 0.9162907318741551  # ln(2.5); round-trip-to-origin leg (catches moderate bad prints)
+  anomaly_roundtrip_tolerance: 0.15            # next close must return within 15% of the pre-spike close
+  anomaly_policy: flag_only                     # flag_only | drop | winsorize (winsorized bars marked synthetic)
+  # --- Stale-price (frozen-feed) detection (Phase 9) ---
+  max_flat_close_days: 10                        # runs of an identical REAL close longer than this → is_stale_price
+  # --- Storage & access (Phase 6) ---
+  write_partitioned_market: true                # also write partitioned/symbol=…/year=… (flat file always written too)
+  # --- Gap & history policy (Phase 8: F, G) ---
+  long_gap_policy: reject_asset                 # reject_asset (legacy) | segment_and_flag (keep most-recent contiguous segment)
+  min_history_days_policy: absolute             # absolute (legacy 365) | membership_aware (use min_history_days_floor)
+  min_history_days_floor: 90                     # floor used when membership_aware (keeps short-lived dead coins)
+
+market_data_pit:
+  # Convenience section to run the survivorship-free handoff end to end:
+  #   python main.py market --section market_data_pit
+  # Build the daily mask first: python scripts/build_membership_daily.py --end 2026-06-30
+  universe_membership_mode: union_full_history
+  attach_membership_mask: true
+  require_pit_membership: true
+  membership_daily_path: "data/raw/universe/universe_membership_daily.parquet"
+  # Survivorship-free ingestion keeps dead/short-lived members with real (segmented) history.
+  long_gap_policy: segment_and_flag
+  min_history_days_policy: membership_aware
+  min_history_days_floor: 90
+  # Widen the keyless exchange waterfall to maximize dead-coin coverage (all non-Binance,
+  # USD/USDC). Fallback aggregators (CryptoCompare/CoinGecko) still backstop delisted coins.
+  exchange_priority: [coinbase, kraken, kucoin, gemini, bitstamp, bitfinex]
+  # Most alts (and many delisted coins) only have USDT pairs on non-Binance venues. Allow
+  # SYM/USDT resolution (USDT~USD) to recover them; Binance stays forbidden. Pricing basis
+  # for USDT-sourced assets is USDT — documented as a research caveat.
+  allow_usdt_fallback: true
+  # Free-data coverage ceiling: after the exchange+USDT+aggregator waterfall, ~85 of 320
+  # union coins remain unfetchable (truly-dead coins + exchange-native tokens like HT/GT/OKB
+  # with no free OHLCV). Accept that residual as a documented price-data survivorship caveat
+  # (membership stays survivorship-free). Coverage achieved: ~235/320.
+  maximum_failed_assets_allowed: 95
 
 market_data_smoke:
   research_mode: true
@@ -510,11 +568,34 @@ onchain_smoke:
     metrics:
       - curated_protocol_metric
 
+onchain_pit:
+  # Survivorship-free on-chain ingest: fetch every coin ever eligible (incl. dead coins).
+  #   python main.py onchain --section onchain_pit
+  universe_membership_mode: union_full_history
+  min_history_days_policy: membership_aware
+  min_history_days_floor: 90
+  refuse_ambiguous_ticker_resolution: true
+
 onchain:
   research_mode: true
   live_api_enabled: true
   use_fixtures: false
   max_assets: null
+  # Phase 1 (PIT collapse fix): latest_snapshot (legacy) | union_full_history (fetch every
+  # coin ever eligible, incl. since-delisted, so dead coins get on-chain coverage in PIT mode).
+  universe_membership_mode: latest_snapshot
+  # Phase 3 (#3): drop look-ahead-unsafe metrics. DeFiLlama pool_tvl_usd/pool_apy are the
+  # CURRENT snapshot stamped onto a past date (today's value at t) — quarantined by default.
+  lookahead_unsafe_metrics: [pool_tvl_usd, pool_apy]
+  # Phase 2 (#2): refuse reused-ticker assets (one symbol → >1 cmc_id) rather than risk
+  # attaching the currently-live coin's on-chain data to a different historical coin.
+  refuse_ambiguous_ticker_resolution: true
+  # Phase 4 (#5): membership-aware history floor for short-lived (delisted) coins.
+  min_history_days_policy: absolute             # absolute | membership_aware
+  min_history_days_floor: 90
+  # Phase 5 (#7,#8): determinism + bounded provider cooldown.
+  as_of_date: null                              # pin e.g. "2026-03-24" for reproducible window
+  provider_cooldown_seconds: 60                 # bounded rate-limit cooldown (was run-global blacklist)
   backfill_days: 2000
   min_history_days: 365
   minimum_assets_with_any_onchain: 15
@@ -648,120 +729,6 @@ onchain_dev:
     - blockchair
     - dune
 
-on_chain:
-  research_mode: true
-  live_api_enabled: true
-  use_fixtures: false
-  max_assets: null
-  backfill_days: 2000
-  min_history_days: 365
-  minimum_assets_with_any_onchain: 15
-  minimum_total_metric_observations: 30000
-  minimum_assets_with_defillama: 5
-  minimum_defillama_observations: 500
-  cache_enabled: true
-  force_refresh: false
-  cache_dir: "data/cache/onchain"
-  output_dir: "data/raw/onchain"
-  request_timeout_seconds: 30
-  min_seconds_between_requests: 1.0
-  max_retries: 4
-  backoff_base_seconds: 3
-  backoff_jitter_seconds: 1.5
-  per_asset_timeout_seconds: 180
-  drop_incomplete_current_day: true
-  fail_on_empty_output: true
-  fail_on_low_coverage: true
-  fail_on_demo_data: true
-  provider_priority:
-    - coinmetrics
-    - defillama
-    - etherscan
-    - thegraph
-    - blockchair
-    - dune
-  coinmetrics:
-    enabled: true
-    required: false
-    base_url: "https://community-api.coinmetrics.io/v4"
-    rate_limit_requests: 10
-    rate_limit_seconds: 6
-    metrics:
-      - AdrActCnt
-      - TxCnt
-      - CapRealUSD
-      - CapMVRVCur
-      - NVTAdj
-      - FeeTotUSD
-      - TxTfrValAdjUSD
-      - SplyCur
-      - CapMrktCurUSD
-      - IssTotUSD
-  defillama:
-    enabled: true
-    required: false
-    base_url: "https://api.llama.fi"
-    metrics:
-      - chain_tvl_usd
-      - protocol_tvl_usd
-      - fees_usd
-      - revenue_usd
-      - dex_volume_usd
-      - stablecoin_mcap_usd
-      - pool_tvl_usd
-      - pool_apy
-  etherscan:
-    enabled: true
-    required: false
-    env_key: "ETHERSCAN_API_KEY"
-    base_url: "https://api.etherscan.io/v2/api"
-    only_if_key_present: true
-    rate_limit_per_second: 3
-    chains:
-      ETH:
-        chainid: 1
-        chain_name: "Ethereum"
-      BNB:
-        chainid: 56
-        chain_name: "BNB Smart Chain"
-      AVAX:
-        chainid: 43114
-        chain_name: "Avalanche C-Chain"
-      MNT:
-        chainid: 5000
-        chain_name: "Mantle"
-    metrics:
-      - gas_used
-      - transaction_count_proxy
-      - token_transfer_count_proxy
-  thegraph:
-    enabled: true
-    required: false
-    env_key: "GRAPH_API_KEY"
-    only_if_key_present: true
-    rate_limit_per_minute: 200
-    configured_subgraphs: {}
-    metrics:
-      - protocol_volume_usd
-      - protocol_tvl_usd
-      - protocol_fees_usd
-  blockchair:
-    enabled: false
-    required: false
-    base_url: "https://api.blockchair.com"
-    chains: {}
-    metrics:
-      - chain_transaction_count
-      - chain_output_volume
-      - chain_fee_total
-  dune:
-    enabled: false
-    required: false
-    env_key: "DUNE_API_KEY"
-    only_if_key_present: true
-    query_ids: {}
-    metrics:
-      - curated_protocol_metric
 onchain_10x365:
   research_mode: true
   live_api_enabled: true
@@ -861,6 +828,22 @@ onchain_50x1000:
     - blockchair
     - dune
 
+features_pit:
+  # Survivorship-free feature generation over the full PIT panel:
+  #   python main.py features --section features_pit
+  membership_mode: pit_daily
+  require_pit_membership: true
+  membership_daily_path: "data/raw/universe/universe_membership_daily.parquet"
+  # PIT-appropriate coverage thresholds. The production (latest-survivor) thresholds
+  # (90/40/90/50000) would FAIL a survivorship-free run: dead coins legitimately have no
+  # on-chain data, so on-chain symbol coverage is genuinely lower (and is NOT a data-quality
+  # failure). On-chain floor is aligned with OnChainAgent's minimum_assets_with_any_onchain (15).
+  # Re-tune against the first real PIT run; these are conservative floors, not silenced checks.
+  min_market_symbols_required: 50
+  min_onchain_symbols_required: 15
+  min_full_feature_symbols_required: 50
+  min_rows_required: 20000
+
 features:
   research_mode: true
   input_market_path: "data/raw/market/market_ohlcv.parquet"
@@ -871,6 +854,12 @@ features:
   input_onchain_manifest_path: "data/raw/onchain/onchain_manifest.json"
   output_dir: "data/features"
   use_duckdb: true
+  # --- Point-in-time universe membership (Phase 1) ---
+  # latest_snapshot : legacy — build features for today's eligible survivors only
+  # pit_daily       : build over the full union panel, emit only true per-day member rows
+  membership_mode: latest_snapshot
+  membership_daily_path: "data/raw/universe/universe_membership_daily.parquet"
+  require_pit_membership: false
   fail_on_missing_inputs: true
   fail_on_empty_output: true
   fail_on_duplicate_symbol_date: true
@@ -939,7 +928,7 @@ features_smoke:
 
 features_25:
   research_mode: true
-  output_dir: "data/features"
+  output_dir: "data/features_25"   # own dir — must NOT overwrite the canonical data/features artifacts
   max_symbols: 25
   min_market_symbols_required: 20
   min_onchain_symbols_required: 10
@@ -985,6 +974,17 @@ labels:
   purge_train_test_overlap_days: 30
   output_partitioned: true
 
+labels_pit:
+  # Survivorship-free PIT handoff: the modeling set is membership-masked (each coin counts
+  # only in months it was actually a top-100 member), so it is far sparser than the legacy
+  # dense universe the base floors (50k) were tuned for. Floors lowered to sanity levels;
+  # the manifest reports the real achieved coverage. Integrity note: less data makes alpha
+  # HARDER to verify, so the negative headline stays conservative.
+  min_symbols_required: 50
+  min_label_rows_required: 5000
+  min_rows_per_horizon_required: 5000
+  min_common_rows_all_horizons: 5000
+
 labels_smoke:
   research_mode: true
   output_dir: "data/labels_smoke"
@@ -1029,6 +1029,8 @@ modeling:
   min_prediction_rows: 1000
   min_test_symbols_per_date: 10
   random_seed: 42
+  compute_shap: true                  # SHAP TreeExplainer feature importance for tree models (non-fatal, deterministic)
+  shap_max_samples: 2000              # cap test rows per fold for SHAP (first-N, deterministic; 0 = all rows)
   walk_forward:
     initial_train_days: 504
     test_days: 30
@@ -1303,6 +1305,8 @@ backtesting:
   fail_on_empty_backtest: true
   fail_on_missing_allocations: true
   max_allowed_drawdown: -0.80
+  subperiod_analysis: true                       # recompute per-regime robustness on real net returns
+  subperiod_count: 3                             # equal contiguous time segments + full_period
 
 backtesting_smoke:
   research_mode: true
@@ -1472,6 +1476,13 @@ mlflow:
   tracking_uri: "mlruns"
   experiment_name: "CHF_experiments"
   log_artifacts: true
+  log_market_run: true                          # Phase 7: log MarketDataAgent runs to MLflow (non-fatal if absent)
+  log_onchain_run: true                          # log OnChainAgent runs to MLflow (non-fatal if absent)
+  log_feature_run: true                          # log FeatureAgent runs to MLflow (non-fatal if absent)
+  log_model_run: true                            # log ModelAgent runs to MLflow (non-fatal if absent)
+  log_backtest_run: true                         # log BacktestAgent runs to MLflow (non-fatal if absent)
+  log_label_run: true                            # log LabelAgent runs to MLflow (non-fatal if absent)
+  log_alpha_research_run: true                    # log AlphaResearchAgent runs to MLflow (non-fatal if absent)
 
 scheduler:
   universe_update_cron: "0 2 1 * *"    # 1st of month at 02:00

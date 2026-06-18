@@ -1,14 +1,14 @@
-#!/bin/bash
-# CHF Dashboard Launcher
+#!/usr/bin/env bash
+# Project CHF read-only research dashboard launcher.
 # Usage: ./run_dashboard.sh
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "============================================"
-echo "  CHF — Crypto Hedge Fund Dashboard"
+echo "  Project CHF — Research Dashboard"
 echo "============================================"
 echo ""
 
@@ -20,15 +20,18 @@ fi
 
 # Check streamlit
 if ! python3 -c "import streamlit" &>/dev/null; then
-    echo "Installing streamlit..."
-    pip3 install streamlit --quiet
+    echo "ERROR: streamlit is not installed in this Python environment."
+    echo "Install project dependencies first:"
+    echo "  python3 -m pip install -r requirements.txt"
+    exit 1
 fi
 
 # Set PYTHONPATH
-export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
 
-echo "Starting Streamlit dashboard..."
+echo "Starting read-only Streamlit dashboard..."
 echo "URL: http://localhost:8501"
+echo "This dashboard does not rerun research or require API secrets."
 echo ""
 echo "Press Ctrl+C to stop."
 echo ""

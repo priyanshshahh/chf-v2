@@ -197,6 +197,15 @@ def inspect_onchain_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     if observations.duplicated(["symbol", "date_ts", "metric_name", "source"]).any():
         failures.append("FAIL: duplicate symbol + date_ts + metric_name + source rows found")
 
+    # Phase 6 (#11): hardening — no fabricated/forward-filled rows; sources are known providers.
+    if "is_forward_filled" in observations.columns:
+        if observations["is_forward_filled"].fillna(False).astype(bool).any():
+            failures.append("FAIL: forward-filled on-chain rows persisted (no fabrication allowed)")
+    allowed_sources = {"coinmetrics", "defillama", "etherscan", "thegraph", "blockchair", "dune"}
+    bad_sources = set(observations["source"].dropna().astype(str).unique()) - allowed_sources
+    if bad_sources:
+        failures.append(f"FAIL: unknown source values in observations: {sorted(bad_sources)}")
+
     min_assets = int(ocfg.get("minimum_assets_with_any_onchain", 1))
     min_obs = int(ocfg.get("minimum_total_metric_observations", 1))
     min_defi_assets = int(ocfg.get("minimum_assets_with_defillama", 0))

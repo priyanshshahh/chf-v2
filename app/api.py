@@ -97,7 +97,16 @@ if HAS_FASTAPI:
             df["date_ts"] = pd.to_datetime(df["date_ts"])
             latest_date = df["date_ts"].max()
             df = df[df["date_ts"] == latest_date]
-        df = df.sort_values("predicted_return", ascending=False).head(limit)
+        # Leakage-safety: a forward-looking signals endpoint must not expose realized
+        # outcomes. Drop any realized/forward target columns before returning.
+        leak_tokens = ("actual", "realized", "future", "label", "target", "fwd")
+        df = df[[c for c in df.columns if not any(tok in c.lower() for tok in leak_tokens)]]
+        sort_col = "predicted_return" if "predicted_return" in df.columns else (
+            "prediction" if "prediction" in df.columns else None
+        )
+        if sort_col:
+            df = df.sort_values(sort_col, ascending=False)
+        df = df.head(limit)
         return {
             "model": model,
             "horizon_days": horizon,
@@ -132,13 +141,19 @@ if HAS_FASTAPI:
 
     @app.get("/latest_snapshot")
     def get_latest_snapshot() -> Dict[str, Any]:
-        """Get the latest snapshot metadata."""
+        """Get the latest universe snapshot metadata."""
         import json
         universe_dir = _root / "data" / "raw" / "universe"
+        # Prefer legacy per-snapshot meta files; fall back to the canonical universe manifest.
         meta_files = sorted(universe_dir.glob("snapshot_meta_*.json"), reverse=True)
-        if not meta_files:
+        meta_path: Optional[Path] = meta_files[0] if meta_files else None
+        if meta_path is None:
+            manifest = universe_dir / "universe_manifest.json"
+            if manifest.exists():
+                meta_path = manifest
+        if meta_path is None or not meta_path.exists():
             raise HTTPException(status_code=404, detail="No snapshot data available")
-        with open(meta_files[0]) as f:
+        with open(meta_path) as f:
             meta = json.load(f)
         return meta
 

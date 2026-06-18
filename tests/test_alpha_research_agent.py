@@ -37,6 +37,7 @@ def _cfg(tmp_path: Path) -> dict:
         }
     )
     cfg["alpha_research"] = acfg
+    cfg["mlflow"] = {**cfg.get("mlflow", {}), "log_alpha_research_run": False}  # test hygiene: no external logging
     return cfg
 
 
@@ -218,3 +219,35 @@ def test_verify_alpha_research_rejects_signal_only_backtest_metric(tmp_path):
 def test_verify_alpha_research_passes_valid_fixture(tmp_path):
     cfg, out = _run(tmp_path)
     assert validate_alpha_research_outputs(cfg) == []
+
+
+def test_alpha_research_manifest_has_data_content_hash(tmp_path):
+    cfg, out = _run(tmp_path)
+    with open(out / "research_manifest.json", "r") as fh:
+        manifest = json.load(fh)
+    h = manifest.get("data_content_hash")
+    assert isinstance(h, str) and len(h) == 16  # deterministic 16-hex SHA-256 fingerprint
+
+
+def test_alpha_research_content_hash_deterministic_and_order_independent(tmp_path):
+    agent = AlphaResearchAgent(_cfg(tmp_path))
+    df = pd.DataFrame({
+        "date_ts": pd.to_datetime(["2026-03-01", "2026-03-01"], utc=True),
+        "symbol": ["BTC", "ETH"], "f1": [0.1, 0.2], "label_fwd_logret_7d": [0.01, 0.02],
+        "snapshot_id": ["s", "s"], "run_id": ["r", "r"], "created_at_utc": ["t", "t"],
+    })
+    h1 = agent._content_hash(df)
+    h2 = agent._content_hash(df.iloc[::-1].reset_index(drop=True))
+    assert h1 and len(h1) == 16 and h1 == h2                       # order-independent
+    df2 = df.copy(); df2["run_id"] = ["other", "other"]
+    assert agent._content_hash(df2) == h1                          # provenance excluded
+    df3 = df.copy(); df3.loc[0, "f1"] = 0.99
+    assert agent._content_hash(df3) != h1                          # real change detected
+
+
+def test_alpha_research_report_renders_without_tabulate(tmp_path):
+    # _md_table must degrade gracefully; report contains the Best Experiments section.
+    cfg, out = _run(tmp_path)
+    report = (out / "alpha_research_report.md").read_text()
+    assert "# Alpha Research Report" in report
+    assert "Best Experiments" in report

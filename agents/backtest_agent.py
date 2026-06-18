@@ -41,6 +41,16 @@ def _safe_float(value: Any) -> float:
     return out
 
 
+def _md_table(df: pd.DataFrame, *, index: bool = False) -> str:
+    """Render a DataFrame as a Markdown table, degrading gracefully to a fixed-width text
+    table when the optional ``tabulate`` dependency is absent (per the graceful-degradation
+    contract). Never raises on a reporting nicety."""
+    try:
+        return df.to_markdown(index=index)
+    except Exception:
+        return df.to_string(index=index)
+
+
 def _perf_from_returns(
     returns: pd.Series,
     *,
@@ -121,6 +131,155 @@ class BacktestAgent(AgentBase):
         self._output_dir = self._project_root / "data" / "backtests"
         self._strategy_start: Optional[pd.Timestamp] = None
         self._strategy_end: Optional[pd.Timestamp] = None
+
+    def _content_hash(self) -> str:
+        """Deterministic 16-hex fingerprint of the exact backtest inputs (price matrix +
+        allocations). Mirrors the other agents' SHA-256 reproducibility guarantee: identical
+        inputs yield an identical run fingerprint, regardless of row/column order."""
+        import hashlib
+
+        frames: List[str] = []
+        if self._prices is not None and not self._prices.empty:
+            p = self._prices.copy()
+            p.index = pd.to_datetime(p.index, utc=True)
+            p = p.sort_index().reindex(columns=sorted(p.columns))
+            frames.append(p.to_json(date_format="iso"))
+        if self._allocations is not None and not self._allocations.empty:
+            cols = [c for c in self._allocations.columns if c not in {"snapshot_id", "run_id", "created_at_utc"}]
+            a = self._allocations[sorted(cols)].copy()
+            for dc in ["date_ts", "signal_date", "execution_date"]:
+                if dc in a.columns:
+                    a[dc] = pd.to_datetime(a[dc], utc=True)
+            sort_keys = [k for k in ["strategy_name", "symbol", "date_ts"] if k in a.columns]
+            if sort_keys:
+                a = a.sort_values(sort_keys)
+            frames.append(a.to_json(orient="records", date_format="iso"))
+        if not frames:
+            return ""
+        return hashlib.sha256("||".join(frames).encode("utf-8")).hexdigest()[:16]
+
+    def _log_to_mlflow(self, manifest: Dict[str, Any]) -> None:
+        """Log the backtest run to MLflow (params/metrics/tags/hash + artifacts). Non-fatal,
+        gated by mlflow.log_backtest_run."""
+        mlcfg = self.cfg.get("mlflow", {}) or {}
+        if not mlcfg.get("log_backtest_run", True):
+            return
+        try:
+            import mlflow
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow not available, skipping backtest logging: {exc}")
+            return
+        try:
+            uri = str(mlcfg.get("tracking_uri", "mlruns"))
+            if "://" not in uri and not Path(uri).is_absolute():
+                uri = str(self._project_root / uri)
+            mlflow.set_tracking_uri(uri)
+            mlflow.set_experiment(mlcfg.get("experiment_name", "CHF_experiments"))
+            with mlflow.start_run(run_name=f"backtest_{self.run_id}"):
+                mlflow.set_tags({"agent": "BacktestAgent", "run_id": self.run_id,
+                                 "snapshot_id": self.snapshot_id or "",
+                                 "data_content_hash": manifest.get("data_content_hash", ""),
+                                 "allocation_mode": str(manifest.get("allocation_mode") or ""),
+                                 "alpha_verified": str(manifest.get("alpha_verified"))})
+                mlflow.log_params({k: manifest.get(k) for k in
+                                   ["transaction_cost_bps", "annualization_days", "allocation_mode"]
+                                   if manifest.get(k) is not None})
+                metrics = {k: float(self.metrics.get(k))
+                           for k in ["strategy_cagr", "strategy_sharpe"]
+                           if self.metrics.get(k) is not None and np.isfinite(_safe_float(self.metrics.get(k)))}
+                if metrics:
+                    mlflow.log_metrics(metrics)
+                if mlcfg.get("log_artifacts", True):
+                    for key in ["backtest_manifest", "backtest_summary_json", "alpha_report_json",
+                                "data_quality_backtest"]:
+                        art = self.output_paths.get(key)
+                        try:
+                            if art and Path(art).exists():
+                                mlflow.log_artifact(str(art))
+                        except Exception:  # pragma: no cover
+                            pass
+            self.metrics["mlflow_logged"] = 1.0
+        except Exception as exc:  # pragma: no cover
+            self.logger.warning(f"mlflow backtest logging failed (non-fatal): {exc}")
+
+    def _build_subperiods(self, all_dates: pd.Series) -> List[Dict[str, Any]]:
+        """Contiguous time segments for regime-robustness analysis. Honest by construction:
+        segments are labeled by their real date ranges, never with fabricated bull/bear tags."""
+        dates = list(pd.to_datetime(all_dates, utc=True).sort_values().drop_duplicates())
+        if not dates:
+            return []
+        subs: List[Dict[str, Any]] = [{"name": "full_period", "start": dates[0], "end": dates[-1]}]
+        explicit = self._bt_cfg.get("subperiods")
+        if isinstance(explicit, list) and explicit:
+            for sp in explicit:
+                try:
+                    subs.append({
+                        "name": str(sp["name"]),
+                        "start": pd.to_datetime(sp["start"], utc=True),
+                        "end": pd.to_datetime(sp["end"], utc=True),
+                    })
+                except Exception:
+                    continue
+            return subs
+        count = int(self._bt_cfg.get("subperiod_count", 3))
+        n = len(dates)
+        if count > 1 and n >= count * 2:
+            chunk = n // count
+            for i in range(count):
+                s = i * chunk
+                e = (i + 1) * chunk - 1 if i < count - 1 else n - 1
+                subs.append({"name": f"segment_{i + 1}_of_{count}", "start": dates[s], "end": dates[e]})
+        return subs
+
+    def _run_subperiod_analysis(self, equity_curves: pd.DataFrame) -> pd.DataFrame:
+        """Per-strategy and per-benchmark performance recomputed over each subperiod from the
+        realized net-return series — the same proper math as the headline run, sliced by window.
+        Lets a reviewer see whether any edge is concentrated in a single regime."""
+        if not self._bt_cfg.get("subperiod_analysis", True) or equity_curves is None or equity_curves.empty:
+            return pd.DataFrame()
+        ec = equity_curves.copy()
+        ec["date_ts"] = pd.to_datetime(ec["date_ts"], utc=True)
+        subperiods = self._build_subperiods(ec["date_ts"])
+        if not subperiods:
+            return pd.DataFrame()
+        ann_days = float(self._bt_cfg.get("annualization_days", 365))
+        init_cap = float(self._bt_cfg.get("initial_capital", 100000))
+        rows: List[Dict[str, Any]] = []
+        for sp in subperiods:
+            window = ec[(ec["date_ts"] >= sp["start"]) & (ec["date_ts"] <= sp["end"])]
+            if window.empty:
+                continue
+            for strategy_name, grp in window.groupby("strategy_name"):
+                grp = grp.sort_values("date_ts").set_index("date_ts")
+                net = pd.to_numeric(grp["net_return"], errors="coerce").fillna(0.0)
+                if net.empty:
+                    continue
+                _eq, _dd, perf = _perf_from_returns(
+                    net,
+                    initial_capital=init_cap,
+                    turnover=pd.to_numeric(grp.get("turnover", 0.0), errors="coerce"),
+                    costs=pd.to_numeric(grp.get("transaction_cost", 0.0), errors="coerce"),
+                    n_positions=pd.to_numeric(grp.get("n_positions", 0.0), errors="coerce"),
+                    annualization_days=ann_days,
+                )
+                rows.append({
+                    "subperiod": sp["name"],
+                    "start_date": pd.Timestamp(sp["start"]).isoformat(),
+                    "end_date": pd.Timestamp(sp["end"]).isoformat(),
+                    "strategy_name": strategy_name,
+                    "benchmark_type": str(grp["benchmark_type"].iloc[0]) if "benchmark_type" in grp.columns else "strategy",
+                    "n_days": int(perf["n_days"]),
+                    "total_return": _safe_float(perf["total_return"]),
+                    "cagr": _safe_float(perf["cagr"]),
+                    "sharpe": _safe_float(perf["sharpe"]),
+                    "sortino": _safe_float(perf["sortino"]),
+                    "max_drawdown": _safe_float(perf["max_drawdown"]),
+                    "hit_rate": _safe_float(perf["hit_rate"]),
+                    "total_cost_drag": _safe_float(perf["total_cost_drag"]),
+                })
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame(rows).sort_values(["subperiod", "strategy_name"]).reset_index(drop=True)
 
     def prepare(self) -> None:
         cfg = self._bt_cfg = self.cfg.get("backtesting", {})
@@ -221,6 +380,7 @@ class BacktestAgent(AgentBase):
         )
         drawdown_series = pd.concat(drawdown_frames, ignore_index=True).sort_values(["strategy_name", "date_ts"])
         turnover_report = pd.concat(turnover_frames, ignore_index=True).sort_values(["strategy_name", "date_ts"])
+        subperiod_performance = self._run_subperiod_analysis(equity_curves)
 
         best_sharpe_row = backtest_summary.sort_values(["sharpe", "total_return"], ascending=[False, False], na_position="last").iloc[0]
         self.metrics["strategy_cagr"] = _safe_float(best_sharpe_row.get("cagr"))
@@ -230,6 +390,7 @@ class BacktestAgent(AgentBase):
         manifest = {
             "run_id": self.run_id,
             "snapshot_id": self.snapshot_id,
+            "data_content_hash": self._content_hash(),
             "created_at_utc": _utcnow_iso(),
             "input_allocation_path": self._bt_cfg.get("allocation_path", "data/allocations/allocations_from_predictions.parquet"),
             "input_allocation_manifest_path": self._bt_cfg.get("allocation_manifest_path", "data/allocations/allocation_manifest.json"),
@@ -245,6 +406,8 @@ class BacktestAgent(AgentBase):
             "alpha_verified": bool((strategy_comparison["alpha_status"] == "passed").any()),
             "annualization_days": float(self._bt_cfg.get("annualization_days", 365)),
             "benchmark_sanity_passed": bool(benchmark_sanity_report["passed_sanity"].fillna(False).all()) if not benchmark_sanity_report.empty else False,
+            "subperiod_analysis_enabled": bool(self._bt_cfg.get("subperiod_analysis", True)),
+            "subperiod_count": int(subperiod_performance["subperiod"].nunique()) if not subperiod_performance.empty else 0,
             "warnings": self._warnings,
             "limitations": [
                 "Backtest results are conditional on the latest eligible survivor universe and may overstate historical tradability because full historical membership and delisting data are not yet modeled.",
@@ -258,6 +421,7 @@ class BacktestAgent(AgentBase):
                 "benchmark_sanity_report": str(self._output_dir / "benchmark_sanity_report.parquet"),
                 "drawdown_series": str(self._output_dir / "drawdown_series.parquet"),
                 "turnover_report": str(self._output_dir / "turnover_report.parquet"),
+                "subperiod_performance": str(self._output_dir / "subperiod_performance.parquet"),
                 "alpha_report_json": str(self._output_dir / "alpha_report.json"),
                 "alpha_report_md": str(self._output_dir / "alpha_report.md"),
             },
@@ -272,6 +436,7 @@ class BacktestAgent(AgentBase):
             "benchmark_sanity_report": benchmark_sanity_report,
             "drawdown_series": drawdown_series,
             "turnover_report": turnover_report,
+            "subperiod_performance": subperiod_performance,
             "alpha_report": alpha_report,
             "manifest": manifest,
             "data_quality_md": self._build_quality_report(backtest_summary, benchmark_summary, strategy_comparison),
@@ -750,15 +915,15 @@ class BacktestAgent(AgentBase):
             "",
             "## Strategy Summary",
             "",
-            summary[["strategy_name", "final_value", "total_return", "cagr", "sharpe", "max_drawdown", "average_turnover", "total_cost_drag"]].to_markdown(index=False),
+            _md_table(summary[["strategy_name", "final_value", "total_return", "cagr", "sharpe", "max_drawdown", "average_turnover", "total_cost_drag"]]),
             "",
             "## Benchmarks",
             "",
-            benchmarks[["strategy_name", "total_return", "cagr", "sharpe", "max_drawdown"]].to_markdown(index=False),
+            _md_table(benchmarks[["strategy_name", "total_return", "cagr", "sharpe", "max_drawdown"]]),
             "",
             "## Alpha Status",
             "",
-            comparison[["strategy_name", "alpha_status", "beats_btc", "beats_eth", "beats_btc_eth_50_50", "beats_equal_weight"]].to_markdown(index=False),
+            _md_table(comparison[["strategy_name", "alpha_status", "beats_btc", "beats_eth", "beats_btc_eth_50_50", "beats_equal_weight"]]),
             "",
             "## Limitations",
             "",
@@ -785,6 +950,12 @@ class BacktestAgent(AgentBase):
             path = bt_dir / filename
             df.to_parquet(path, index=False)
             self.output_paths[filename.replace(".parquet", "")] = str(path)
+
+        subperiod = result.get("subperiod_performance")
+        if subperiod is not None and not subperiod.empty:
+            subperiod_path = bt_dir / "subperiod_performance.parquet"
+            subperiod.to_parquet(subperiod_path, index=False)
+            self.output_paths["subperiod_performance"] = str(subperiod_path)
 
         summary_json = bt_dir / "backtest_summary.json"
         with open(summary_json, "w") as fh:
@@ -813,7 +984,7 @@ class BacktestAgent(AgentBase):
                     "",
                     "## Strategy Comparison",
                     "",
-                    comparison.to_markdown(index=False),
+                    _md_table(comparison),
                     "",
                     result["alpha_report"].get("diagnostic_note", ""),
                     "",
@@ -832,6 +1003,8 @@ class BacktestAgent(AgentBase):
         quality_path = bt_dir / "data_quality_backtest.md"
         quality_path.write_text(result["data_quality_md"])
         self.output_paths["data_quality_backtest"] = str(quality_path)
+
+        self._log_to_mlflow(result["manifest"])
 
     def _validate_result(self, result: Dict[str, Any]) -> None:
         required_frames = [

@@ -130,7 +130,7 @@ class CoinMarketCapProvider:
             "limit": int(limit),
             "convert": convert,
             "sort": "cmc_rank",
-            "sort_dir": "desc",
+            "sort_dir": "asc",  # rank 1 = top coin; "desc" returns the bottom-ranked junk
             "cryptocurrency_type": "all",
             "aux": "platform,tags,date_added,circulating_supply,total_supply,max_supply,cmc_rank,num_market_pairs",
         }

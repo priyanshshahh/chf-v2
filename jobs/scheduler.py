@@ -1,152 +1,87 @@
 """
-CHF APScheduler Job Runner
-Schedules automated pipeline execution with configurable cron expressions.
+Project CHF local scheduler.
+
+The scheduler calls existing CLI entrypoints through subprocess. It does not
+implement research logic and is disabled unless explicitly started.
 """
 from __future__ import annotations
 
+import logging
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(_ROOT))
+ROOT = Path(__file__).resolve().parents[1]
+LOG_DIR = ROOT / "logs" / "scheduler"
 
-from configs.config import get_config
-from configs.logging_config import get_logger, setup_logging
-
-logger = get_logger("jobs.scheduler")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("chf.scheduler")
 
 
-def run_universe_job():
-    """Scheduled job: update universe."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_universe()
+def run_cli(label: str, command: list[str]) -> None:
+    """Run a supported CHF CLI command and raise on failure."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_path = LOG_DIR / f"{stamp}_{label}.log"
+    logger.info("Starting %s: %s", label, " ".join(command))
+    proc = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    log_path.write_text(
+        "\n".join(
+            [
+                f"label: {label}",
+                f"command: {' '.join(command)}",
+                f"returncode: {proc.returncode}",
+                "",
+                "STDOUT:",
+                proc.stdout,
+                "",
+                "STDERR:",
+                proc.stderr,
+            ]
+        ),
+        encoding="utf-8",
+    )
+    if proc.returncode != 0:
+        logger.error("%s failed. See %s", label, log_path)
+        raise RuntimeError(f"{label} failed with return code {proc.returncode}")
+    logger.info("%s completed. Log: %s", label, log_path)
 
 
-def run_market_data_job():
-    """Scheduled job: fetch market data."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_market_data()
-
-
-def run_onchain_job():
-    """Scheduled job: fetch on-chain data."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_onchain()
-
-
-def run_features_job():
-    """Scheduled job: compute features."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_clean()
-    runner.run_features()
-    runner.run_labels()
-
-
-def run_models_job():
-    """Scheduled job: train models."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_models()
-
-
-def run_portfolio_job():
-    """Scheduled job: generate portfolio allocations."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_portfolio()
-
-
-def run_backtest_job():
-    """Scheduled job: run backtests."""
-    from pipelines.pipeline_runner import PipelineRunner
-    runner = PipelineRunner()
-    runner.run_backtest()
-
-
-def start_scheduler():
-    """Start the APScheduler with all configured jobs."""
+def start_scheduler() -> None:
     try:
         from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.triggers.cron import CronTrigger
-    except ImportError:
-        logger.error("APScheduler not installed. Run: pip install apscheduler")
-        return
-
-    cfg = get_config()
-    sched_cfg = cfg.get("scheduler", {})
+    except ImportError as exc:
+        raise SystemExit("APScheduler is missing. Install dependencies with: python3 -m pip install -r requirements.txt") from exc
 
     scheduler = BlockingScheduler(timezone="UTC")
 
-    # Universe update: 1st of month at 02:00 UTC
-    scheduler.add_job(
-        run_universe_job,
-        CronTrigger.from_crontab(sched_cfg.get("universe_update_cron", "0 2 1 * *")),
-        id="universe_update",
-        name="Universe Update",
-        misfire_grace_time=3600,
-    )
+    jobs = [
+        ("universe", "UniverseAgent monthly", ["python3", "main.py", "universe", "--config", "configs/run_config.yaml"], "0 2 1 * *"),
+        ("market", "MarketDataAgent daily", ["python3", "main.py", "market", "--config", "configs/run_config.yaml"], "0 6 * * *"),
+        ("onchain", "OnChainAgent daily", ["python3", "main.py", "onchain", "--config", "configs/run_config.yaml"], "0 7 * * *"),
+        ("features", "FeatureAgent daily", ["python3", "main.py", "features", "--config", "configs/run_config.yaml"], "0 8 * * *"),
+        ("labels", "LabelAgent daily", ["python3", "main.py", "labels", "--config", "configs/run_config.yaml"], "30 8 * * *"),
+        ("model", "ModelAgent weekly", ["python3", "main.py", "model", "--config", "configs/run_config.yaml"], "0 10 * * 1"),
+        ("portfolio", "PortfolioAgent weekly", ["python3", "main.py", "portfolio", "--config", "configs/run_config.yaml"], "0 12 * * 1"),
+    ]
 
-    # Market data: daily at 06:00 UTC
-    scheduler.add_job(
-        run_market_data_job,
-        CronTrigger.from_crontab(sched_cfg.get("market_data_cron", "0 6 * * *")),
-        id="market_data",
-        name="Market Data Fetch",
-        misfire_grace_time=3600,
-    )
+    for job_id, label, command, cron in jobs:
+        scheduler.add_job(
+            run_cli,
+            CronTrigger.from_crontab(cron),
+            args=[job_id, command],
+            id=job_id,
+            name=label,
+            misfire_grace_time=3600,
+            max_instances=1,
+        )
 
-    # On-chain data: daily at 07:00 UTC
-    scheduler.add_job(
-        run_onchain_job,
-        CronTrigger.from_crontab(sched_cfg.get("on_chain_cron", "0 7 * * *")),
-        id="onchain_data",
-        name="On-Chain Data Fetch",
-        misfire_grace_time=3600,
-    )
-
-    # Features: daily at 08:00 UTC
-    scheduler.add_job(
-        run_features_job,
-        CronTrigger.from_crontab(sched_cfg.get("feature_cron", "0 8 * * *")),
-        id="features",
-        name="Feature Engineering",
-        misfire_grace_time=3600,
-    )
-
-    # Models: 1st of month at 10:00 UTC
-    scheduler.add_job(
-        run_models_job,
-        CronTrigger.from_crontab(sched_cfg.get("model_cron", "0 10 1 * *")),
-        id="models",
-        name="Model Training",
-        misfire_grace_time=7200,
-    )
-
-    # Portfolio: every Monday at 12:00 UTC
-    scheduler.add_job(
-        run_portfolio_job,
-        CronTrigger.from_crontab(sched_cfg.get("portfolio_cron", "0 12 * * 1")),
-        id="portfolio",
-        name="Portfolio Allocation",
-        misfire_grace_time=3600,
-    )
-
-    # Backtest: 1st of month at 14:00 UTC
-    scheduler.add_job(
-        run_backtest_job,
-        CronTrigger.from_crontab(sched_cfg.get("backtest_cron", "0 14 1 * *")),
-        id="backtest",
-        name="Backtest Run",
-        misfire_grace_time=7200,
-    )
-
-    logger.info("CHF Scheduler starting with jobs:")
+    logger.info("Project CHF scheduler starting. Press Ctrl+C to stop.")
+    logger.info("BacktestAgent is intentionally manual/research-validation only by default.")
     for job in scheduler.get_jobs():
-        logger.info(f"  - {job.name}: {job.trigger}")
+        logger.info("%s -> %s", job.name, job.trigger)
 
     try:
         scheduler.start()
@@ -155,5 +90,5 @@ def start_scheduler():
 
 
 if __name__ == "__main__":
-    setup_logging(level="INFO", json_output=False)
+    sys.path.insert(0, str(ROOT))
     start_scheduler()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,6 +12,7 @@ import duckdb
 import pandas as pd
 import yaml
 
+from agents import universe_sources as us
 from agents.base import AgentBase
 from configs.config import get_config_hash
 from providers.coincap import CoinCapProvider
@@ -122,6 +125,9 @@ class UniverseAgent(AgentBase):
         self.min_monthly_eligible_count = 0
         self.max_monthly_eligible_count = 0
         self.cmc_provider: Optional[CoinMarketCapProvider] = None
+        self._source: str = ""
+        self._uses_cmc_id: bool = False
+        self._onchain_min_times: Optional[Dict[str, pd.Timestamp]] = None
 
     def _resolve_output_dir(self) -> Path:
         raw = self.ucfg.get("output_dir") or str(self.get_path("raw") / "universe")
@@ -153,7 +159,8 @@ class UniverseAgent(AgentBase):
 
         if self.ucfg.get("research_mode", False) and not self.ucfg.get("cache_enabled", True):
             raise UniverseValidationError("research_mode requires cache_enabled=true")
-        if self.ucfg.get("use_cmc_historical_listings", False):
+        self._source = self._resolve_source()
+        if self._source == "cmc_listings_live":
             self.cmc_provider = CoinMarketCapProvider(
                 cache_dir=self.cache_dir,
                 request_timeout_seconds=float(self.ucfg.get("request_timeout_seconds", 30)),
@@ -165,9 +172,168 @@ class UniverseAgent(AgentBase):
                 force_refresh=bool(self.ucfg.get("force_refresh", False)),
             )
 
-    def run(self) -> Dict[str, Any]:
+    # ---------------------------------------------------------------- source resolution
+    def _resolve_source(self) -> str:
+        """Resolve the universe data source (unified entrypoint for all 3 legacy agents).
+
+        Explicit ``universe.source`` wins. ``auto`` prefers the survivorship-free deep
+        PIT source, then survivorship-resistant local datasets, then live providers.
+        Backward-compat: ``use_cmc_historical_listings: true`` => cmc_listings_live.
+        """
+        src = str(self.ucfg.get("source") or "").strip().lower()
+        if src and src != "auto":
+            return src
+        # auto (or unset): an explicit CMC-live flag wins, then deep PIT datasets,
+        # then a local historical dataset, then live providers (latest snapshot).
         if self.ucfg.get("use_cmc_historical_listings", False):
+            return "cmc_listings_live"
+        if src == "auto":
+            if self._cmc_web_dataset_path().exists():
+                return "cmc_web_pit"
+            if self._local_dataset_path().exists():
+                return "local_dataset"
+        return "live_market"
+
+    def _cmc_web_dataset_path(self) -> Path:
+        raw = self.ucfg.get("cmc_web_dataset_path") or "data/external/cmc_web/cmc_web_listings_historical.parquet"
+        p = Path(raw)
+        return p if p.is_absolute() else Path(self.cfg["_project_root"]) / p
+
+    def _local_dataset_path(self) -> Path:
+        raw = self.ucfg.get("historical_dataset_path") or "data/external/historical_universe.csv"
+        p = Path(raw)
+        return p if p.is_absolute() else Path(self.cfg["_project_root"]) / p
+
+    def _cmc_listings_download_path(self) -> Path:
+        raw = self.ucfg.get("cmc_listings_path") or "data/external/cmc/cmc_listings_historical.parquet"
+        p = Path(raw)
+        return p if p.is_absolute() else Path(self.cfg["_project_root"]) / p
+
+    def run(self) -> Dict[str, Any]:
+        self._source = self._resolve_source()
+        if self._source == "cmc_listings_live":
+            self._uses_cmc_id = True
             return self._run_cmc_historical_mode()
+        if self._source == "cmc_listings_download":
+            self._uses_cmc_id = True
+            return self._run_cmc_download_mode()
+        if self._source == "cmc_web_pit":
+            self._uses_cmc_id = True
+            return self._run_cmc_web_pit_mode()
+        if self._source == "local_dataset":
+            return self._run_local_dataset_mode()
+        return self._run_live_market_mode()
+
+    # ------------------------------------------------------------- unified assembler
+    def _assemble_plan(self, plan: "us.SourcePlan") -> Dict[str, Any]:
+        """Run a resolved SourcePlan's per-snapshot candidate frames through the shared core."""
+        self.provider_name = plan.provider_name
+        if plan.provider_name:
+            self.providers_used.append(plan.provider_name)
+        self.universe_mode = plan.mode_name
+        self.survivor_only_universe = plan.survivor_only
+        self._uses_cmc_id = plan.uses_cmc_id
+        if plan.limitation:
+            self.historical_snapshot_limitation = plan.limitation
+            if plan.limitation not in self.limitations:
+                self.limitations.append(plan.limitation)
+
+        fail_on_empty = bool(self.ucfg.get("fail_on_empty_month", True))
+        universe_rows: List[pd.DataFrame] = []
+        exclusions_rows: List[pd.DataFrame] = []
+        membership_rows: List[pd.DataFrame] = []
+        coverage_rows: List[Dict[str, Any]] = []
+        snapshot_hashes: Dict[str, str] = {}
+
+        for snap_ts, candidates in plan.snapshots:
+            if candidates.empty:
+                if fail_on_empty:
+                    raise UniverseValidationError(f"No candidate assets for {snap_ts.date()}")
+                continue
+            if plan.processing == "cmc":
+                processed, exclusions, coverage, snapshot_hash = self._process_cmc_snapshot(candidates, snap_ts)
+            elif plan.processing == "pit":
+                processed, exclusions, coverage, snapshot_hash = self._process_pit_snapshot(candidates, snap_ts)
+            else:
+                processed, exclusions, coverage, snapshot_hash = self._process_snapshot(
+                    candidates, snap_ts, plan.provider_name
+                )
+                processed = processed[processed["is_eligible"]].copy() if "is_eligible" in processed.columns else processed
+            if processed.empty and fail_on_empty:
+                raise UniverseValidationError(f"No eligible universe rows for {snap_ts.date()}")
+            universe_rows.append(processed.copy())
+            exclusions_rows.append(exclusions.copy())
+            membership_rows.append(self._membership_rows_from_processed(processed, exclusions))
+            coverage_rows.append(coverage)
+            snapshot_hashes[snap_ts.strftime("%Y-%m-%d")] = snapshot_hash
+
+        if not universe_rows:
+            raise UniverseValidationError("No eligible universe snapshots produced")
+
+        universe_df = pd.concat(universe_rows, ignore_index=True)
+        exclusions_df = pd.concat(exclusions_rows, ignore_index=True) if exclusions_rows else pd.DataFrame()
+        membership_df = (
+            pd.concat(membership_rows, ignore_index=True) if membership_rows else pd.DataFrame(columns=MEMBERSHIP_COLUMNS)
+        )
+        coverage_df = pd.DataFrame(coverage_rows)
+        monthly_counts = coverage_df["eligible_count"].astype(int) if not coverage_df.empty else pd.Series(dtype=int)
+
+        snap_dates = pd.to_datetime(universe_df["snapshot_date"], utc=True)
+        self.requested_start_date = plan.requested_start or snap_dates.min().date().isoformat()
+        self.requested_end_date = plan.requested_end or snap_dates.max().date().isoformat()
+        self.actual_start_date = snap_dates.min().date().isoformat()
+        self.actual_end_date = snap_dates.max().date().isoformat()
+        self.historical_snapshots_requested = len(plan.snapshots)
+        self.historical_snapshots_created = len(coverage_rows)
+        self.unique_assets_total = (
+            int(universe_df["cmc_id"].nunique()) if plan.uses_cmc_id and "cmc_id" in universe_df.columns
+            else int(universe_df["symbol"].nunique())
+        )
+        self.average_monthly_eligible_count = float(monthly_counts.mean()) if not monthly_counts.empty else 0.0
+        self.min_monthly_eligible_count = int(monthly_counts.min()) if not monthly_counts.empty else 0
+        self.max_monthly_eligible_count = int(monthly_counts.max()) if not monthly_counts.empty else 0
+        self.metrics["eligible_count"] = int(len(universe_df))
+        self.metrics["excluded_count"] = int(len(exclusions_df))
+        self.metrics["snapshot_count"] = int(len(coverage_rows))
+        return {
+            "universe": universe_df.reindex(columns=CORE_COLUMNS),
+            "exclusions": exclusions_df,
+            "coverage": coverage_df,
+            "membership": membership_df,
+            "snapshot_hashes": snapshot_hashes,
+        }
+
+    def _run_cmc_web_pit_mode(self) -> Dict[str, Any]:
+        plan = us.build_cmc_web_pit(
+            self._cmc_web_dataset_path(),
+            int(self.ucfg.get("candidate_n", 300)),
+            self.ucfg.get("start_date"),
+            self.ucfg.get("end_date"),
+            int(self.ucfg.get("asof_staleness_days", 40)),
+        )
+        return self._assemble_plan(plan)
+
+    def _run_cmc_download_mode(self) -> Dict[str, Any]:
+        plan = us.build_cmc_listings_download(
+            self._cmc_listings_download_path(),
+            self.ucfg.get("start_date"),
+            self.ucfg.get("end_date"),
+        )
+        return self._assemble_plan(plan)
+
+    def _run_local_dataset_mode(self) -> Dict[str, Any]:
+        plan = us.build_local_dataset(
+            self._local_dataset_path(),
+            self.ucfg.get("column_map"),
+            int(self.ucfg.get("candidate_n", self.ucfg.get("final_universe_n", 100))),
+            self.ucfg.get("start_date"),
+            self.ucfg.get("end_date"),
+            int(self.ucfg.get("lookback_days", 1095)),
+            int(self.ucfg.get("asof_staleness_days", 45)),
+        )
+        return self._assemble_plan(plan)
+
+    def _run_live_market_mode(self) -> Dict[str, Any]:
         snapshot_dates = self._build_snapshot_dates()
         if not snapshot_dates:
             raise UniverseValidationError("No universe snapshot dates produced")
@@ -342,6 +508,125 @@ class UniverseAgent(AgentBase):
         coverage = self._cmc_coverage_row(df, eligible, exclusions, snapshot_date)
         return eligible.reindex(columns=CORE_COLUMNS), exclusions, coverage, snapshot_hash
 
+    def _process_pit_snapshot(
+        self,
+        candidates: pd.DataFrame,
+        snapshot_date: pd.Timestamp,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any], str]:
+        """Survivorship-free PIT snapshot with point-in-time-correct strict gates.
+
+        Membership is the real top-N as of ``snapshot_date`` (incl. since-delisted
+        coins). Gates are evaluated point-in-time: maturity from ``first_seen_utc``
+        (dateAdded), exchange tradability via ``num_market_pairs`` as a PIT proxy,
+        on-chain coverage against the CoinMetrics catalog's earliest-availability
+        date as of the snapshot, and a liquidity floor. Keyed on the stable cmc_id;
+        the final eligible set is symbol-unique for downstream joins.
+        """
+        now = pd.Timestamp.now(tz="UTC")
+        df = candidates.copy()
+        df["symbol"] = df["symbol"].astype(str).str.upper().str.strip()
+        df = df[df["symbol"] != ""].copy()
+        if "cmc_id" in df.columns:
+            df["cmc_id"] = pd.to_numeric(df["cmc_id"], errors="coerce").astype("Int64")
+        for col in ["market_cap_usd", "volume_24h_usd", "price_usd"]:
+            df[col] = pd.to_numeric(df.get(col), errors="coerce").fillna(0.0)
+        df = df.sort_values(["market_cap_usd", "market_cap_rank"], ascending=[False, True])
+        df["snapshot_date"] = snapshot_date
+        df["snapshot_year"] = int(snapshot_date.year)
+        df["snapshot_month"] = int(snapshot_date.month)
+        df["created_at_utc"] = now
+        if "provider" not in df.columns:
+            df["provider"] = "coinmarketcap"
+        if "source" not in df.columns:
+            df["source"] = "coinmarketcap_web_historical"
+
+        flags = df.apply(self._classification_flags, axis=1, result_type="expand")
+        df = pd.concat([df, flags], axis=1)
+
+        df["is_mature_365d"] = df.apply(lambda r: self._check_maturity(r, snapshot_date), axis=1)
+        trad = df.apply(self._check_tradability_pit, axis=1, result_type="expand")
+        df["is_exchange_tradable"] = trad["is_exchange_tradable"]
+        df["exchange"] = trad["exchange"]
+        df["exchange_symbol"] = trad["exchange_symbol"]
+        onchain = df["symbol"].apply(lambda s: self._check_onchain_coverage_pit(s, snapshot_date))
+        df["has_onchain_coverage"] = [x[0] for x in onchain]
+        df["onchain_coverage_source"] = [x[1] for x in onchain]
+        min_volume = float(self.ucfg.get("min_daily_volume_usd", 0) or 0)
+        df["passes_liquidity"] = df["volume_24h_usd"] >= min_volume
+
+        reasons = df.apply(self._exclusion_reason, axis=1, result_type="expand")
+        df["is_eligible"] = reasons["is_eligible"]
+        df["exclusion_stage"] = reasons["exclusion_stage"]
+        df["exclusion_rule"] = reasons["exclusion_rule"]
+        df["exclusion_reason"] = reasons["exclusion_reason"]
+
+        eligible = df[df["is_eligible"]].copy().sort_values(
+            ["market_cap_usd", "market_cap_rank"], ascending=[False, True]
+        )
+        # Final set must be symbol-unique (downstream joins key on symbol) even though
+        # cmc_id is the stable membership key.
+        eligible = eligible.drop_duplicates(subset=["symbol"], keep="first")
+        final_n = int(self.ucfg.get("final_universe_n", self.ucfg.get("top_n", 100)))
+        eligible = eligible.head(final_n).copy()
+        final_ids = set(eligible["cmc_id"].dropna().astype(int))
+
+        outside = df["is_eligible"] & ~df["cmc_id"].isin(final_ids)
+        df.loc[outside, "is_eligible"] = False
+        df.loc[outside & (df["exclusion_reason"] == ""), "exclusion_reason"] = "outside_final_top_n"
+        df.loc[outside & (df["exclusion_rule"] == ""), "exclusion_rule"] = "final_universe_n"
+        df.loc[outside & (df["exclusion_stage"] == ""), "exclusion_stage"] = "final_selection"
+
+        snapshot_hash = self._snapshot_hash_cmc(df[df["cmc_id"].isin(final_ids)])
+        df["snapshot_id"] = snapshot_hash
+        eligible = df[df["cmc_id"].isin(final_ids)].copy()
+        exclusions = df[~df["is_eligible"]].copy()
+
+        min_eligible = int(self.ucfg.get("minimum_eligible_n", 1))
+        if len(eligible) < min_eligible and self.ucfg.get("fail_on_low_eligible_count", True):
+            raise UniverseValidationError(
+                f"Eligible PIT universe too small for {snapshot_date.date()}: {len(eligible)} < {min_eligible}"
+            )
+        coverage = self._coverage_row(df, eligible, exclusions, snapshot_date, "coinmarketcap_web_historical")
+        coverage["historical_market_cap_available"] = True
+        return eligible.reindex(columns=CORE_COLUMNS), exclusions, coverage, snapshot_hash
+
+    def _check_tradability_pit(self, row: pd.Series) -> Dict[str, Any]:
+        """Point-in-time tradability proxy using the snapshot's market-pair count.
+
+        True exchange-listing dates are not historically reconstructible from a
+        rankings snapshot; numMarketPairs at the snapshot is the available PIT
+        signal (a coin with active market pairs then was tradable then).
+        """
+        if not self.ucfg.get("require_exchange_tradability", True):
+            return {"is_exchange_tradable": True, "exchange": "", "exchange_symbol": ""}
+        n = pd.to_numeric(row.get("num_market_pairs"), errors="coerce")
+        min_pairs = int(self.ucfg.get("min_market_pairs_for_tradability", 1))
+        ok = bool(pd.notna(n) and n >= min_pairs)
+        return {
+            "is_exchange_tradable": ok,
+            "exchange": "cmc_market_pairs" if ok else "",
+            "exchange_symbol": str(row.get("symbol", "")) if ok else "",
+        }
+
+    def _check_onchain_coverage_pit(self, symbol: str, snapshot_date: pd.Timestamp) -> Tuple[bool, str]:
+        """PIT on-chain coverage: asset had CoinMetrics data on/before the snapshot date."""
+        if not self.ucfg.get("require_onchain_coverage", True):
+            return True, ""
+        min_times = self._load_onchain_min_times()
+        earliest = min_times.get(symbol.upper())
+        if earliest is not None and snapshot_date >= earliest:
+            return True, "coinmetrics"
+        return False, ""
+
+    def _load_onchain_min_times(self) -> Dict[str, pd.Timestamp]:
+        if self._onchain_min_times is None:
+            self._onchain_min_times = us.load_coinmetrics_min_times(
+                self.http,
+                force_refresh=bool(self.ucfg.get("force_refresh", False)),
+                live_api_enabled=bool(self.ucfg.get("live_api_enabled", True)),
+            )
+        return self._onchain_min_times
+
     def _snapshot_hash_cmc(self, df: pd.DataFrame) -> str:
         cols = ["snapshot_date", "cmc_id", "symbol", "market_cap_usd", "market_cap_rank"]
         payload = df[cols].sort_values(["snapshot_date", "cmc_id"]).to_json(orient="records", date_format="iso")
@@ -409,6 +694,13 @@ class UniverseAgent(AgentBase):
         exclusions_df.to_parquet(exclusions_path, index=False)
         coverage_df.to_parquet(coverage_path, index=False)
 
+        # Hive-partitioned dataset (year=YYYY/month=MM) for filter-pushdown reads.
+        partitioned_dir = self._write_partitioned(universe_df)
+
+        # QA tear-sheet (human-readable coverage / exclusion / provenance report).
+        qa_path = self.output_dir / "data_quality_universe.md"
+        self._write_qa_tearsheet(qa_path, universe_df, exclusions_df, coverage_df)
+
         manifest = {
             "run_id": self.run_id,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -416,15 +708,17 @@ class UniverseAgent(AgentBase):
             "start_date": self.ucfg.get("start_date"),
             "end_date": self.ucfg.get("end_date"),
             "universe_mode": self.universe_mode,
+            "source": self._source,
+            "uses_cmc_id": bool(self._uses_cmc_id),
             "survivor_only_universe": bool(self.survivor_only_universe),
-            "provider": self.provider_name or ("coinmarketcap" if self.ucfg.get("use_cmc_historical_listings", False) else ""),
+            "provider": self.provider_name or ("coinmarketcap" if self._uses_cmc_id else ""),
             "requested_start_date": self.requested_start_date,
             "requested_end_date": self.requested_end_date,
             "actual_start_date": self.actual_start_date,
             "actual_end_date": self.actual_end_date,
             "historical_snapshots_requested": int(self.historical_snapshots_requested),
             "historical_snapshots_created": int(self.historical_snapshots_created),
-            "latest_snapshot_created": bool(self.universe_mode == "latest_snapshot_only" or (not self.ucfg.get("use_cmc_historical_listings", False) and self.historical_snapshots_created == 1)),
+            "latest_snapshot_created": bool(self.universe_mode == "latest_snapshot_only" or (not self._uses_cmc_id and self.historical_snapshots_created == 1)),
             "historical_snapshot_limitation": self.historical_snapshot_limitation,
             "survivorship_bias_disclosed": True,
             "candidate_n": self.ucfg.get("candidate_n"),
@@ -453,6 +747,8 @@ class UniverseAgent(AgentBase):
                 "exclusions": str(exclusions_path),
                 "coverage": str(coverage_path),
                 "manifest": str(manifest_path),
+                "qa_tearsheet": str(qa_path),
+                "partitioned_dir": str(partitioned_dir) if partitioned_dir else "",
             },
             "snapshot_hashes": result.get("snapshot_hashes", {}),
             "warnings": self.warnings,
@@ -467,8 +763,43 @@ class UniverseAgent(AgentBase):
             "exclusions": str(exclusions_path),
             "coverage": str(coverage_path),
             "manifest": str(manifest_path),
+            "qa_tearsheet": str(qa_path),
         }
+        if partitioned_dir:
+            self.output_paths["partitioned_dir"] = str(partitioned_dir)
         self._validate_outputs()
+
+    def _write_partitioned(self, universe_df: pd.DataFrame) -> Optional[Path]:
+        """Write the eligible universe as a Hive-partitioned Parquet dataset.
+
+        Produces ``<output_dir>/partitioned/year=YYYY/month=MM/*.parquet`` via a
+        DuckDB ``COPY ... PARTITION_BY (year, month)`` statement. This enables
+        filter-pushdown reads (``WHERE year=... AND month=...``) without scanning
+        the whole dataset, while the flat ``universe_monthly.parquet`` is retained
+        for backward compatibility with downstream agents and verifiers.
+        """
+        if universe_df.empty or "snapshot_year" not in universe_df.columns:
+            return None
+        partitioned_dir = self.output_dir / "partitioned"
+        # Deterministic rewrite: clear any prior partitions for this dataset.
+        if partitioned_dir.exists():
+            shutil.rmtree(partitioned_dir)
+        partitioned_dir.mkdir(parents=True, exist_ok=True)
+        con = duckdb.connect(database=":memory:")
+        try:
+            con.register("universe_df", universe_df)
+            con.execute(
+                "COPY ("
+                "SELECT *, "
+                "CAST(snapshot_year AS INTEGER) AS year, "
+                "CAST(snapshot_month AS INTEGER) AS month "
+                "FROM universe_df"
+                f") TO '{partitioned_dir.as_posix()}' "
+                "(FORMAT PARQUET, PARTITION_BY (year, month), OVERWRITE_OR_IGNORE TRUE)"
+            )
+        finally:
+            con.close()
+        return partitioned_dir
 
     def _build_snapshot_dates(self) -> List[pd.Timestamp]:
         if self.snapshot_date_override:
@@ -660,35 +991,55 @@ class UniverseAgent(AgentBase):
         coverage = self._coverage_row(df, eligible, exclusions, snapshot_date, source_used)
         return eligible, exclusions, coverage, snapshot_hash
 
+    @staticmethod
+    def _normalize_tags(value: Any) -> set:
+        """Coerce a tag cell (list / ndarray / ';'-string / None / scalar) to a slug set."""
+        if value is None:
+            return set()
+        if hasattr(value, "tolist") and not isinstance(value, (list, tuple, str)):
+            value = value.tolist()
+        if isinstance(value, str):
+            items = re.split(r"[;,]", value)
+        elif isinstance(value, (list, tuple, set)):
+            items = list(value)
+        else:
+            try:
+                if pd.isna(value):
+                    return set()
+            except (TypeError, ValueError):
+                pass
+            items = [value]
+        return {str(t).strip().lower().replace(" ", "-") for t in items if str(t).strip()}
+
     def _classification_flags(self, row: pd.Series) -> Dict[str, bool]:
-        symbol = str(row.get("symbol", "")).upper()
+        """Classify an asset by EXACT category-tag slug, then NAME whole-word, then
+        symbol denylist. No substring-against-blob matching (that mis-flagged PoS L1s
+        tagged 'staking' as LST and DEX tokens tagged 'derivatives' as synthetic)."""
+        symbol = str(row.get("symbol", "")).upper().strip()
         name = str(row.get("name", "")).lower()
-        tags = row.get("raw_category_tags") or []
-        if not isinstance(tags, list):
-            tags = [str(tags)]
-        tags_l = [str(t).lower().replace(" ", "-") for t in tags]
-        text = f"{symbol.lower()} {name} {' '.join(tags_l)}"
-        deny_symbols = {s.upper() for s in self.exclusions_cfg.get("denylist_symbols", [])}
+        name_words = {w for w in re.split(r"[\s\-_/]+", name) if w}
+        tags = self._normalize_tags(row.get("raw_category_tags"))
+        ex = self.exclusions_cfg
 
-        def has_any(keys: str) -> bool:
-            return any(str(k).lower() in text for k in self.exclusions_cfg.get(keys, []))
+        def tag_hit(key: str) -> bool:
+            return bool(tags & {str(t).strip().lower() for t in ex.get(key, [])})
 
-        cat_deny = set(self.exclusions_cfg.get("category_denylist", []))
-        is_cat_denied = any(t in cat_deny for t in tags_l)
-        is_stable = has_any("stable_keywords") or ("stablecoins" in tags_l)
-        is_wrapped = has_any("wrapped_keywords") or (is_cat_denied and "wrapped-tokens" in tags_l)
-        is_bridged = has_any("bridged_keywords") or "bridged-tokens" in tags_l
-        is_lst = has_any("lst_keywords") or "liquid-staking-tokens" in tags_l
-        is_synth = has_any("synthetic_pegged_keywords")
-        if symbol in deny_symbols and not any([is_stable, is_wrapped, is_bridged, is_lst, is_synth]):
-            is_synth = True
-        return {
-            "is_stablecoin": is_stable,
-            "is_wrapped": is_wrapped,
-            "is_bridged": is_bridged,
-            "is_lst": is_lst,
-            "is_synthetic_pegged": is_synth,
+        def name_hit(key: str) -> bool:
+            return bool(name_words & {str(w).strip().lower() for w in ex.get(key, [])})
+
+        flags = {
+            "is_stablecoin": tag_hit("stablecoin_tags") or name_hit("stable_name_words"),
+            "is_wrapped": tag_hit("wrapped_tags") or name_hit("wrapped_name_words"),
+            "is_bridged": tag_hit("bridged_tags") or name_hit("bridged_name_words"),
+            "is_lst": tag_hit("lst_tags") or name_hit("lst_name_words"),
+            "is_synthetic_pegged": tag_hit("synthetic_tags") or name_hit("synthetic_name_words"),
         }
+        # Exact-symbol denylist backstop (mainly for tagless sources). A denylisted
+        # symbol with no positive classification is still excluded (catch-all).
+        deny_symbols = {str(s).upper() for s in ex.get("denylist_symbols", [])}
+        if symbol in deny_symbols and not any(flags.values()):
+            flags["is_synthetic_pegged"] = True
+        return flags
 
     def _check_maturity(self, row: pd.Series, snapshot_date: pd.Timestamp) -> bool:
         if not self.ucfg.get("require_365d_maturity", True):
@@ -819,6 +1170,10 @@ class UniverseAgent(AgentBase):
             ("onchain_coverage", "require_onchain_coverage", "no_onchain_coverage", not row.get("has_onchain_coverage")),
             ("market_data", "positive_market_cap", "missing_market_cap", float(row.get("market_cap_usd") or 0) <= 0),
         ]
+        if self.ucfg.get("require_min_volume", False):
+            checks.append(
+                ("liquidity", "min_daily_volume_usd", "below_min_volume", row.get("passes_liquidity") is False)
+            )
         for stage, rule, reason, failed in checks:
             if failed:
                 return {
@@ -872,7 +1227,7 @@ class UniverseAgent(AgentBase):
         coverage_path = self.output_dir / "universe_coverage_report.parquet"
         manifest_path = self.output_dir / "universe_manifest.json"
         required_paths = [universe_path, exclusions_path, coverage_path, manifest_path]
-        if self.ucfg.get("use_cmc_historical_listings", False):
+        if self._uses_cmc_id:
             required_paths.append(membership_path)
         for path in required_paths:
             if not path.exists():
@@ -895,13 +1250,13 @@ class UniverseAgent(AgentBase):
                 failures.append(f"eligible universe contains {col}=true")
         if (
             self.ucfg.get("require_exchange_tradability", True)
-            and not self.ucfg.get("use_cmc_historical_listings", False)
+            and not self._uses_cmc_id
             and (universe["is_exchange_tradable"] == False).any()  # noqa: E712
         ):
             failures.append("eligible universe contains non-tradable rows")
         if (
             self.ucfg.get("require_onchain_coverage", True)
-            and not self.ucfg.get("use_cmc_historical_listings", False)
+            and not self._uses_cmc_id
             and (universe["has_onchain_coverage"] == False).any()  # noqa: E712
         ):
             failures.append("eligible universe contains rows without on-chain coverage")
@@ -909,10 +1264,15 @@ class UniverseAgent(AgentBase):
             failures.append("eligible universe contains non-positive market_cap_usd")
         if universe["snapshot_id"].isna().any():
             failures.append("snapshot_id is null")
-        dup_cols = ["snapshot_date", "cmc_id"] if self.ucfg.get("use_cmc_historical_listings", False) and "cmc_id" in universe.columns else ["snapshot_date", "symbol"]
-        if universe.duplicated(dup_cols).any():
-            failures.append(f"duplicate {' + '.join(dup_cols)} rows")
-        if self.ucfg.get("use_cmc_historical_listings", False):
+        # Final universe must be unique on (snapshot, symbol) for downstream joins, and
+        # additionally on (snapshot, cmc_id) when cmc_id is the stable membership key.
+        dup_key_sets = [["snapshot_date", "symbol"]]
+        if self._uses_cmc_id and "cmc_id" in universe.columns:
+            dup_key_sets.append(["snapshot_date", "cmc_id"])
+        for dup_cols in dup_key_sets:
+            if universe.duplicated(dup_cols).any():
+                failures.append(f"duplicate {' + '.join(dup_cols)} rows")
+        if self._uses_cmc_id:
             if "cmc_id" not in universe.columns or universe["cmc_id"].isna().any():
                 failures.append("eligible universe contains null cmc_id")
 
@@ -921,6 +1281,86 @@ class UniverseAgent(AgentBase):
 
         coverage["passed_validation"] = True
         coverage.to_parquet(coverage_path, index=False)
+
+    def _write_qa_tearsheet(
+        self,
+        path: Path,
+        universe_df: pd.DataFrame,
+        exclusions_df: pd.DataFrame,
+        coverage_df: pd.DataFrame,
+    ) -> None:
+        """Write a human-readable QA tear-sheet (coverage, exclusions, provenance)."""
+        def pct(mask_sum: int, total: int) -> str:
+            return f"{(100.0 * mask_sum / total):.1f}%" if total else "n/a"
+
+        n = len(universe_df)
+        lines: List[str] = []
+        lines.append("# Universe QA Tear-Sheet")
+        lines.append("")
+        lines.append(f"- Generated (UTC): {datetime.now(timezone.utc).isoformat()}")
+        lines.append(f"- run_id: `{self.run_id}` | config_hash: `{get_config_hash(self.cfg)}`")
+        lines.append(f"- Source / mode: `{self._source}` / `{self.universe_mode}`")
+        lines.append(f"- Survivorship-bias-free: **{not self.survivor_only_universe}** | cmc_id-keyed: **{self._uses_cmc_id}**")
+        lines.append(
+            f"- Coverage: {self.actual_start_date} → {self.actual_end_date} "
+            f"({self.historical_snapshots_created} monthly snapshots; requested {self.historical_snapshots_requested})"
+        )
+        lines.append(
+            f"- Eligible rows: **{n}** | unique assets: **{self.unique_assets_total}** | "
+            f"per-month eligible avg/min/max: {self.average_monthly_eligible_count:.1f}/"
+            f"{self.min_monthly_eligible_count}/{self.max_monthly_eligible_count}"
+        )
+        lines.append("")
+        lines.append("## Eligibility gate coverage (eligible rows)")
+        if n:
+            for col, label in [
+                ("is_mature_365d", "≥365d mature (point-in-time, dateAdded)"),
+                ("is_exchange_tradable", "exchange-tradable (PIT proxy)"),
+                ("has_onchain_coverage", "on-chain coverage (CoinMetrics PIT)"),
+            ]:
+                if col in universe_df.columns:
+                    s = universe_df[col].fillna(False)
+                    lines.append(f"- {label}: {pct(int(s.sum()), n)}")
+            if "market_cap_usd" in universe_df.columns:
+                lines.append(f"- positive market cap: {pct(int((universe_df['market_cap_usd'] > 0).sum()), n)}")
+        lines.append("")
+        lines.append("## Exclusion breakdown (by reason)")
+        if not exclusions_df.empty and "exclusion_reason" in exclusions_df.columns:
+            vc = exclusions_df["exclusion_reason"].fillna("").replace("", "(none)").value_counts()
+            for reason, count in vc.items():
+                lines.append(f"- `{reason}`: {int(count)}")
+        else:
+            lines.append("- (no exclusions recorded)")
+        lines.append("")
+        lines.append("## Per-snapshot eligible counts")
+        if not coverage_df.empty and {"snapshot_date", "eligible_count"}.issubset(coverage_df.columns):
+            cov = coverage_df.sort_values("snapshot_date")
+            lines.append("| snapshot | candidates | eligible | excluded |")
+            lines.append("|---|---:|---:|---:|")
+            for _, r in cov.iterrows():
+                d = pd.Timestamp(r["snapshot_date"]).date()
+                lines.append(
+                    f"| {d} | {int(r.get('candidate_count', 0))} | "
+                    f"{int(r.get('eligible_count', 0))} | {int(r.get('excluded_count', 0))} |"
+                )
+        lines.append("")
+        lines.append("## Provenance & API usage")
+        lines.append(f"- providers used: {sorted(set(self.providers_used))}")
+        lines.append(f"- cache hits: {int(self.http.cache_hit_count)}")
+        lines.append(f"- live API calls by provider: {dict(self.http.api_call_count_by_provider)}")
+        lines.append(f"- failed API calls by provider: {dict(self.http.failed_api_call_count_by_provider)}")
+        if self.warnings:
+            lines.append("")
+            lines.append("## Warnings")
+            for w in self.warnings[:50]:
+                lines.append(f"- {w}")
+        lines.append("")
+        lines.append("## Limitations")
+        for lim in (self.limitations or ["(none recorded)"]):
+            lines.append(f"- {lim}")
+        lines.append("")
+        with open(path, "w") as f:
+            f.write("\n".join(lines))
 
     def load_latest_universe(self) -> pd.DataFrame:
         path = self.output_dir / "universe_monthly.parquet"

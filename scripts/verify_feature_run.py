@@ -186,6 +186,15 @@ def inspect_feature_outputs(cfg: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             if not pruned_features.issuperset(kept):
                 warnings.append("pruned output does not contain every kept feature from keep list")
 
+    # --- Phase 1: PIT membership — the panel must be time-varying, not a survivor collapse ---
+    if str(fcfg.get("membership_mode", "latest_snapshot")).lower() == "pit_daily" and not full.empty:
+        months = pd.to_datetime(full["date_ts"], utc=True, errors="coerce").dt.to_period("M").nunique()
+        if months < 2:
+            failures.append(
+                f"membership_mode=pit_daily but full_features spans only {months} month(s); "
+                "expected a multi-month time-varying universe"
+            )
+
     return failures, warnings
 
 
