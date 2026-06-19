@@ -4,6 +4,8 @@ Project CHF is a reproducible quantitative crypto research pipeline that tests w
 
 Start with the final research package in [docs/RESEARCH_RESULTS_SUMMARY.md](docs/RESEARCH_RESULTS_SUMMARY.md), then use [docs/REPRODUCIBILITY_COMMANDS.md](docs/REPRODUCIBILITY_COMMANDS.md) for reproduction notes.
 
+**Repository:** [github.com/priyanshshahh/chf-v2](https://github.com/priyanshshahh/chf-v2) — clone and track the `main` branch.
+
 ## Research Question
 
 Can market and on-chain features be used to construct crypto portfolios that outperform BTC, ETH, BTC/ETH 50-50, and an equal-weight crypto universe after costs and realistic validation?
