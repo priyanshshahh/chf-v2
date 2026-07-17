@@ -116,3 +116,38 @@ instead of 404ing on refresh.
   snapshot of the committed research artifacts (`alpha_verified=false`).
 - To refresh the numbers, re-run the pipeline locally, re-run `npm run build`,
   and redeploy.
+
+---
+
+# Free backend (LingCode Cloud) — LIVE
+
+The frontend reads its data from a **free managed Postgres backend** (LingCode
+Cloud) via a read-only, RLS-enforced data API, and falls back to the baked
+`/data/*.json` files if the backend is unreachable. This is the "single seam"
+described in `frontend/src/useData.js`.
+
+- **Gateway:** `https://lingcode.dev/api/cloud/be/91f37821eecac54d365f7d0b`
+- **Table:** `datasets(name text pk, payload jsonb, updated_at timestamptz)` —
+  one row per baked artifact (`summary`, `equity`, `leaderboard`, `backtest`, …;
+  18 rows total).
+- **Read (what the browser does):**
+
+  ```bash
+  curl -s -X POST "$BE/select" \
+    -H "Authorization: Bearer $ANON_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"table":"datasets","limit":200}'
+  ```
+
+- **Security:** the embedded key is the **anon** (public) client key; RLS allows
+  `SELECT` only. No write policy is attached, so the data is read-only from the
+  client. CORS is `*`, so the Vercel origin can call it directly.
+- **Refresh the backend data:** re-bake locally (`npm run bake`), then re-upsert
+  the `frontend/public/data/*.json` blobs into the `datasets` table (temporarily
+  re-add an `INSERT`/`UPDATE` RLS policy, load, then drop it).
+- **Override at build time:** set `VITE_CHF_BACKEND_URL=""` to force the static
+  `/data/*.json` path instead of the backend.
+
+> Note: LingCode Cloud hosts static frontends + Cloudflare-Workers full-stack
+> apps and this Postgres data API — it does **not** run a Python server, so the
+> Streamlit dashboard still deploys separately (Streamlit Community Cloud).
