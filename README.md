@@ -219,6 +219,8 @@ See [Dashboard Guide](docs/DASHBOARD_GUIDE.md).
 
 CHF also includes a separate React product/MVP dashboard under `frontend/`. It presents **CHF Alpha Research OS** as a fintech-style product interface for agentic crypto research automation, portfolio intelligence, benchmark monitoring, reproducible review, and generated-artifact exploration. It is separate from the Streamlit research dashboard and does not recompute research or touch generated outputs.
 
+**Live demo:** **[chf-dashboard.vercel.app](https://chf-dashboard.vercel.app)** — a static, prebuilt deployment on Vercel (`npm run bake` bakes the committed `data/` artifacts into `frontend/public/data/*.json`, then `vite build`). It is read-only and recomputes nothing.
+
 Run it directly:
 
 ```bash

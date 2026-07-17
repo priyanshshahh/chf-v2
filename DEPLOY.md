@@ -72,3 +72,47 @@ offline with no `.env`.
 
 Render.com works identically (Web Service → Docker → free instance), but its
 free tier also sleeps and builds are slower; HF Spaces is the better fallback.
+
+---
+
+# Deploying the React product dashboard (Vercel) — LIVE
+
+The `frontend/` React app is deployed as a **prebuilt static site** on Vercel:
+
+**Live:** https://chf-dashboard.vercel.app
+
+## Why prebuilt
+
+`npm run build` runs a `prebuild` hook (`scripts/build_data.py`) that bakes the
+committed `data/` parquet/JSON artifacts into `frontend/public/data/*.json`.
+That step needs **Python 3 and the local `data/` artifacts**, which are not
+present in Vercel's Node build container. So we build locally and upload the
+static output rather than letting Vercel build in the cloud.
+
+## Reproduce a deploy
+
+```bash
+# 1. Build locally (Node 20/22 — Node 25 currently segfaults vite 7):
+cd frontend
+npm ci
+npm run build            # bake + vite build -> frontend/dist/
+
+# 2. Deploy the prebuilt dist as a static site:
+cp -R dist /tmp/chf-dashboard
+cat > /tmp/chf-dashboard/vercel.json <<'JSON'
+{ "routes": [ { "handle": "filesystem" }, { "src": "/.*", "dest": "/index.html" } ] }
+JSON
+cd /tmp/chf-dashboard
+vercel deploy --prod --yes --scope <your-vercel-scope>
+```
+
+The `vercel.json` `filesystem` + catch-all route is the SPA fallback so
+React-Router deep links (e.g. `/agents/backtest`) resolve to `index.html`
+instead of 404ing on refresh.
+
+## Honest constraints
+
+- The site is **read-only** and recomputes nothing — it renders the baked
+  snapshot of the committed research artifacts (`alpha_verified=false`).
+- To refresh the numbers, re-run the pipeline locally, re-run `npm run build`,
+  and redeploy.
