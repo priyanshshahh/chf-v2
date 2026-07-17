@@ -2,7 +2,7 @@
 
 ## Scope
 
-Phase 3 Alpha-Search Expansion ran `AlphaResearchAgent` in signal-only mode. PortfolioAgent and BacktestAgent were not run in this phase, and no alpha is verified by this report.
+Alpha-Search Expansion ran `AlphaResearchAgent` in signal-only mode. PortfolioAgent and BacktestAgent were not run in this phase, and no alpha is verified by this report.
 
 Required limitation:
 

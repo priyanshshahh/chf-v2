@@ -1,0 +1,56 @@
+# CHF portfolio risk-management layer configuration.
+# Consumed by portfolio/risk_limits.py, portfolio/vol_target.py,
+# portfolio/drawdown_control.py, portfolio/liquidity.py, portfolio/risk_pipeline.py.
+# Deterministic, no LLM. Do not merge into run_config.yaml.
+
+risk:
+  paths:
+    market_data: "data/raw/market/market_ohlcv.parquet"
+    run_config: "configs/run_config.yaml"      # read-only: book -> weights_path lookup
+    output_dir: "data/risk"
+    state_dir: "data/risk"
+
+  limits:
+    max_single_asset_weight: 0.20      # hard cap per asset (industry norm ~10-20%)
+    max_top5_concentration: 0.60       # sum of 5 largest weights
+    max_category_weight: 0.40          # per category, when category data available
+    max_gross_exposure: 1.0            # long-only gross cap; remainder is cash
+    max_iterations: 100                # clip -> renormalize convergence bound
+    tolerance: 1.0e-9
+    # Category metadata sources, tried in order. Each may be:
+    #  - a directory of CMC pro_api_categories JSON payloads, or
+    #  - a JSON file mapping SYMBOL -> [category, ...].
+    # If none is usable the layer degrades gracefully to no-category checks
+    # (recorded in the audit as category_data_unavailable).
+    category_sources:
+      - "cmc_complete/data/coinmarketcap_data/pro_api_categories"
+      # - "data/external/coingecko_categories.json"   # optional fallback (sparse coverage)
+
+  vol_target:
+    target_vol_annual: 0.15            # 15% annualized target
+    ewma_halflife_days: 30
+    annualization_days: 365
+    min_exposure: 0.2                  # multiplier floor
+    max_exposure: 1.0                  # multiplier ceiling (no leverage)
+    min_observations: 20               # below this, multiplier = 1.0 (flagged)
+    max_risk_contribution: 0.25        # no asset may contribute >25% of forecast variance
+    risk_contribution_max_iterations: 50
+    risk_contribution_tolerance: 1.0e-6
+
+  drawdown:
+    soft_breach: -0.10                 # NORMAL -> DERISKED
+    hard_breach: -0.20                 # -> FLAT
+    derisked_multiplier: 0.5
+    flat_multiplier: 0.0
+    reentry_recovery_fraction: 0.5     # recover half the drawdown from trough, OR:
+    reentry_days: 30                   # >=30d in state AND NAV above its 30d MA
+    reentry_ma_days: 30
+    state_file_template: "data/risk/drawdown_state_{book}.json"
+
+  liquidity:
+    adv_window_days: 30                # dollar ADV lookback
+    max_adv_participation: 0.05        # position notional <= 5% of ADV per rebalance day
+    nav_usd: 100000                    # paper NAV for notional checks
+    dtl_participation: 0.25            # days-to-liquidate at 25% ADV participation
+    dtl_book_fractions: [0.25, 0.5, 1.0]
+    stressed_volume_divisor: 3         # stressed scenario: ADV / 3

@@ -10,6 +10,25 @@ and nothing below should be done in a way that softens or overstates it.
 
 ---
 
+## 0. 2026-07-05 update — completed and new items
+
+Done on 2026-07-05:
+- **Backlog item [1] (real ML models in the canonical run): DONE.** `modeling.model_names` now runs `baseline_cross_sectional_mean`, `linear_ridge` (newly added to `ModelAgent._build_model`), `random_forest`, `lightgbm`. Canonical rerun produced 600,888 predictions; PortfolioAgent selected `linear_ridge/market_plus_onchain/14d`; refreshed backtest remains `alpha_verified=false` (best strategy `top_5_vol_scaled`, -5.53%, Sharpe 0.171, 2025-03-25→2026-05-12, re-run after the pagination fix below).
+- **Canonical portfolio-stage break fixed:** PortfolioAgent's leakage guard rejected `model_predictions.parquet` (contains `actual_*` columns), which had silently stalled canonical allocations since April. ModelAgent now also writes a sanitized `model_predictions_portfolio_input.parquet`, and `portfolio.prediction_path` points at it (legacy fallback preserved).
+- **Paper trading added** (`papertrade/`, `main.py papertrade`, daily scheduler job, `docs/PAPER_TRADING.md`): per-strategy virtual books + benchmark books, 20 bps costs, idempotent daily runs.
+- CMC pipeline defects fixed (dataset-name collision, quotes `run()` interface, registry wiring, `pyproject.toml` build backend) and spec 001 tests completed (T016, T019–T028, T031).
+- **PIT market ingest DONE:** canonical `market_ohlcv.parquet` re-ingested survivorship-free at 268,592 rows after a ccxt pagination fix — coinbase/kraken per-request page caps had silently truncated history (BTC/ETH now cover full 2021→2026-07-04). Benchmark sanity checking hardened: degenerate benchmarks now fail the backtest with explicit `no_valid_price_days` / `flat_benchmark_series` reasons instead of passing silently. Re-run canonical backtest: best `top_5_vol_scaled` -5.53% (Sharpe 0.171) over 2025-03-25→2026-05-12 vs BTC -8.13% / ETH +9.83% / 50-50 +2.96% / equal-weight -46.43% — still `alpha_verified=false`.
+- **Expanded 240-experiment alpha research DONE:** 201 experiments ran, 71 candidates surfaced, top-3 distinct candidates verified end-to-end by BacktestAgent against the fixed full-history market data (window 2025-11-06→2026-04-28; real benchmarks BTC -24.81%, ETH -31.05%, 50-50 -27.61%, equal-weight -21.38%). Final verdicts — all `alpha_verified=false`: `elastic_net_market_only_30d` best `score_weighted_long_only` -32.69% (Sharpe -1.24, beats no benchmark); `elastic_net_onchain_14d` best `top_5_vol_scaled` -19.96% (Sharpe -0.87, loses less than all four benchmarks but still deeply negative); `random_forest_liqmom_14d` best `top_20_vol_scaled` -38.10% (Sharpe -1.18, beats no benchmark). No verified alpha.
+- **Backlog items [3], [4], [7], [9] ALL DONE:** [3] Optuna hyperparameter search, [4] feature source map, [7] tearsheets + vectorbt cross-check, [9] extra label targets + regime filters.
+- **Orchestration layer built** — see `docs/agentic_architecture.md`.
+- **Institutional layer built (2026-07-05/06):** dual-book fund accounting (`accounting/`: reconciliation + gross/net NAV + hash-chained audit log), full monitoring suite (`monitoring/`: data quality, signal health, execution quality, model decay, risk report, shadow NAV, watchdog, champion/challenger), portfolio risk pipeline (`portfolio/`: vol target, liquidity/limits, drawdown state machine → `data/risk/`), 4 deterministic strategy sleeves + regime classifier + sleeve allocator (`strategies/`, sleeve paper books under `data/papertrade/sleeve_*`), and the deterministic monthly letter (`reports/monthly_letter.py` → `artifacts/letters/`; CLI: `main.py nav|monitor|letter`; Fund Ops pages in the web frontend and Streamlit dashboard). Everything result-affecting stays behind the orchestration approval gates (sleeve allocation is a proposal artifact only), and the research verdict is unchanged: still `alpha_verified=false`.
+
+New follow-ups:
+- **`CMC_API_KEY` in `.env` is invalid (HTTP 401)** — paper trading falls back to CoinGecko; books holding symbols outside CoinGecko's top-500 (or ambiguous symbols like TON) skip until a valid key is set.
+- Consider re-running `alpha_research` against the refreshed predictions, and the multi-hour survivorship-free market PIT ingest (`market_data_pit`) before the next full research freeze.
+
+---
+
 ## 1. Current state
 
 The CHF pipeline is leakage-safe by construction (purged + embargoed walk-forward

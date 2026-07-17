@@ -1,0 +1,496 @@
+{
+  "snapshots": 66,
+  "avg_eligible": 100.0,
+  "avg_candidates": 300.0,
+  "coverage": [
+    {
+      "date": "2021-01",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-02",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-03",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-04",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-05",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-06",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-07",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-08",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-09",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-10",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-11",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2021-12",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-01",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-02",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-03",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-04",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-05",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-06",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-07",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-08",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-09",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-10",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-11",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2022-12",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-01",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-02",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-03",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-04",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-05",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-06",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-07",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-08",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-09",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-10",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-11",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2023-12",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-01",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-02",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-03",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-04",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-05",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-06",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-07",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-08",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-09",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-10",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-11",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2024-12",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-01",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-02",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-03",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-04",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-05",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-06",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-07",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-08",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-09",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-10",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-11",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2025-12",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2026-01",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2026-02",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2026-03",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2026-04",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2026-05",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    },
+    {
+      "date": "2026-06",
+      "candidate": 300,
+      "eligible": 100,
+      "excluded": 200,
+      "final": 100
+    }
+  ],
+  "exclusions": [
+    {
+      "reason": "Immature (<365d)",
+      "count": 2753
+    },
+    {
+      "reason": "No on-chain data",
+      "count": 1413
+    },
+    {
+      "reason": "Stablecoin",
+      "count": 1159
+    },
+    {
+      "reason": "LST",
+      "count": 474
+    },
+    {
+      "reason": "Wrapped",
+      "count": 384
+    },
+    {
+      "reason": "Bridged",
+      "count": 17
+    }
+  ],
+  "survivorship_note": "Point-in-time membership is the real CMC top-N as of each month (incl. since-delisted coins, survivorship-bias-free). Maturity is verified point-in-time from dateAdded; exchange tradability uses numMarketPairs as a point-in-time proxy; on-chain coverage is verified against the CoinMetrics catalog's earliest-availability date as of the snapshot."
+}

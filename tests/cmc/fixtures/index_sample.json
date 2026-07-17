@@ -1,0 +1,60 @@
+{
+  "cmc100": {
+    "status": {"error_code": 0, "error_message": null},
+    "data": [
+      {
+        "update_time": "2024-01-01T00:00:00.000Z",
+        "value": 100.0,
+        "constituents": [
+          {"id": 1, "symbol": "BTC", "weight": 0.62},
+          {"id": 1027, "symbol": "ETH", "weight": 0.38}
+        ]
+      },
+      {
+        "update_time": "2024-01-02T00:00:00.000Z",
+        "value": 101.2,
+        "constituents": [
+          {"id": 1, "symbol": "BTC", "weight": 0.63},
+          {"id": 1027, "symbol": "ETH", "weight": 0.37}
+        ]
+      },
+      {
+        "update_time": "2024-01-03T00:00:00.000Z",
+        "value": 99.8,
+        "constituents": [
+          {"id": 1, "symbol": "BTC", "weight": 0.61},
+          {"id": 1027, "symbol": "ETH", "weight": 0.39}
+        ]
+      }
+    ]
+  },
+  "cmc20": {
+    "status": {"error_code": 0, "error_message": null},
+    "data": [
+      {
+        "update_time": "2024-01-01T00:00:00.000Z",
+        "value": 100.0,
+        "constituents": [
+          {"id": 1, "symbol": "BTC", "weight": 0.70, "priceUsd": 42000.0, "units": 0.0000167},
+          {"id": 1027, "symbol": "ETH", "weight": 0.30, "priceUsd": 2300.0, "units": 0.00013}
+        ]
+      },
+      {
+        "update_time": "2024-01-02T00:00:00.000Z",
+        "value": 102.5,
+        "constituents": [
+          {"id": 1, "symbol": "BTC", "weight": 0.71, "priceUsd": 43000.0, "units": 0.0000167},
+          {"id": 1027, "symbol": "ETH", "weight": 0.29, "priceUsd": 2280.0, "units": 0.00013}
+        ]
+      },
+      {
+        "update_time": "2024-01-03T00:00:00.000Z",
+        "value": 98.9,
+        "constituents": [
+          {"id": 1, "symbol": "BTC", "weight": 0.69, "priceUsd": 41500.0, "units": 0.0000167},
+          {"id": 1027, "symbol": "ETH", "weight": 0.31, "priceUsd": 2350.0, "units": 0.00013}
+        ]
+      }
+    ]
+  }
+}

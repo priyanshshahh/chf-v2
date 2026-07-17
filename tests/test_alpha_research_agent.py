@@ -245,6 +245,158 @@ def test_alpha_research_content_hash_deterministic_and_order_independent(tmp_pat
     assert agent._content_hash(df3) != h1                          # real change detected
 
 
+# ---------------------------------------------------------------------------
+# NEXT_STEPS [9]: stronger label targets and regime filters
+# ---------------------------------------------------------------------------
+
+
+def _write_market(tmp_path: Path, closes) -> None:
+    mdir = tmp_path / "data" / "raw" / "market"
+    mdir.mkdir(parents=True, exist_ok=True)
+    dates = pd.date_range("2024-01-01", periods=len(closes), freq="D", tz="UTC")
+    pd.DataFrame({"date_ts": dates, "symbol": "BTC", "close": list(closes)}).to_parquet(
+        mdir / "market_ohlcv.parquet", index=False
+    )
+
+
+def _bull_bear_closes(n: int = 180, split: int = 140) -> list[float]:
+    # Strong up-trend, then a collapse to a tiny constant: BTC 90d return is
+    # strictly positive for dates [90, split) and strictly negative for [split, n).
+    return [100.0 * 1.01**i if i < split else 1.0 for i in range(n)]
+
+
+def test_vol_adjusted_forward_return_label_math(tmp_path):
+    cfg = _cfg(tmp_path)
+    _write_inputs(tmp_path)
+    agent = AlphaResearchAgent(cfg)
+    agent.prepare()
+    labels = pd.read_parquet(tmp_path / "data" / "research" / "label_variants.parquet")
+    original = pd.read_parquet(tmp_path / "data" / "labels" / "label_matrix.parquet")
+    feats = pd.read_parquet(tmp_path / "data" / "features" / "full_features.parquet")
+    merged = labels.merge(original, on=["date_ts", "symbol"]).merge(
+        feats[["date_ts", "symbol", "realized_vol_30d"]], on=["date_ts", "symbol"]
+    )
+    expected = merged["label_fwd_logret_7d"] / merged["realized_vol_30d"]
+    assert np.allclose(merged["vol_adjusted_forward_return_7d"], expected)
+
+
+def test_vol_adjusted_label_guards_zero_vol(tmp_path):
+    cfg = _cfg(tmp_path)
+    _write_inputs(tmp_path)
+    feat_path = tmp_path / "data" / "features" / "full_features.parquet"
+    feats = pd.read_parquet(feat_path)
+    feats.loc[feats["symbol"] == "ADA", "realized_vol_30d"] = 0.0
+    feats.to_parquet(feat_path, index=False)
+    agent = AlphaResearchAgent(cfg)
+    agent.prepare()
+    labels = pd.read_parquet(tmp_path / "data" / "research" / "label_variants.parquet")
+    ada = labels[labels["symbol"] == "ADA"]["vol_adjusted_forward_return_7d"]
+    btc = labels[labels["symbol"] == "BTC"]["vol_adjusted_forward_return_7d"]
+    assert ada.isna().all()  # div-by-zero -> NaN, never inf
+    assert np.isfinite(btc).all()
+
+
+def test_cross_sectional_rank_label_in_unit_interval(tmp_path):
+    cfg = _cfg(tmp_path)
+    _write_inputs(tmp_path)
+    agent = AlphaResearchAgent(cfg)
+    agent.prepare()
+    labels = pd.read_parquet(tmp_path / "data" / "research" / "label_variants.parquet")
+    original = pd.read_parquet(tmp_path / "data" / "labels" / "label_matrix.parquet")
+    assert labels["cross_sectional_rank_7d"].between(0, 1).all()
+    merged = labels.merge(original, on=["date_ts", "symbol"])
+    expected = merged.groupby("date_ts")["label_fwd_logret_7d"].rank(method="average", pct=True)
+    assert np.allclose(merged["cross_sectional_rank_7d"], expected)
+
+
+def test_regime_masks_known_bull_bear_split(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["alpha_research"]["regime_filters"] = [
+        {"name": "bull", "rule": "bull"},
+        {"name": "bear", "rule": "bear"},
+    ]
+    _write_inputs(tmp_path)
+    _write_market(tmp_path, _bull_bear_closes())
+    agent = AlphaResearchAgent(cfg)
+    agent.prepare()
+    masks = agent._prepare_regime_masks()
+    dates = pd.date_range("2024-01-01", periods=180, freq="D", tz="UTC")
+    assert masks["bull"] == set(dates[90:140])   # first 90 dates: no 90d return -> no regime
+    assert masks["bear"] == set(dates[140:180])
+    assert not masks["bull"] & masks["bear"]
+
+
+def test_regime_vol_masks_disjoint(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["alpha_research"]["regime_filters"] = [
+        {"name": "high_vol", "rule": "high_vol"},
+        {"name": "low_vol", "rule": "low_vol"},
+    ]
+    _write_inputs(tmp_path)
+    _write_market(tmp_path, _bull_bear_closes())
+    agent = AlphaResearchAgent(cfg)
+    agent.prepare()
+    masks = agent._prepare_regime_masks()
+    assert masks["high_vol"] and masks["low_vol"]
+    assert not masks["high_vol"] & masks["low_vol"]
+
+
+def test_regime_columns_annotate_leaderboard_without_multiplying_experiments(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["alpha_research"]["regime_filters"] = [
+        {"name": "bull", "rule": "bull"},
+        {"name": "bear", "rule": "bear"},
+    ]
+    _write_inputs(tmp_path)
+    _write_market(tmp_path, _bull_bear_closes())
+    assert AlphaResearchAgent(cfg).execute(max_retries=1)
+    lb = pd.read_parquet(tmp_path / "data" / "research" / "research_leaderboard.parquet")
+    for col in ["rank_ic_bull", "rank_ic_tstat_bull", "n_dates_bull", "rank_ic_bear", "n_dates_bear"]:
+        assert col in lb.columns
+    assert len(lb) <= cfg["alpha_research"]["max_experiments"]  # annotation, not multiplication
+    assert not lb["experiment_id"].duplicated().any()
+    with open(tmp_path / "data" / "research" / "research_manifest.json") as fh:
+        manifest = json.load(fh)
+    assert manifest["regime_filters_applied"] == ["bear", "bull"]
+
+
+def test_regime_degrades_gracefully_when_btc_missing(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["alpha_research"]["regime_filters"] = [{"name": "bull", "rule": "bull"}]
+    _write_inputs(tmp_path)  # no market file written at all
+    assert AlphaResearchAgent(cfg).execute(max_retries=1)
+    lb = pd.read_parquet(tmp_path / "data" / "research" / "research_leaderboard.parquet")
+    assert "rank_ic_bull" not in lb.columns
+    with open(tmp_path / "data" / "research" / "research_manifest.json") as fh:
+        manifest = json.load(fh)
+    assert manifest["regime_filters_applied"] == []
+    assert any("regime filters skipped" in w for w in manifest["warnings"])
+
+
+def test_regime_degrades_gracefully_on_low_btc_coverage(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["alpha_research"]["regime_filters"] = [{"name": "bull", "rule": "bull"}]
+    _write_inputs(tmp_path)
+    _write_market(tmp_path, [100.0 + i for i in range(20)])  # 20/180 dates << 80%
+    assert AlphaResearchAgent(cfg).execute(max_retries=1)
+    lb = pd.read_parquet(tmp_path / "data" / "research" / "research_leaderboard.parquet")
+    assert "rank_ic_bull" not in lb.columns
+    with open(tmp_path / "data" / "research" / "research_manifest.json") as fh:
+        manifest = json.load(fh)
+    assert manifest["regime_filters_applied"] == []
+    assert any("covers" in w and "panel dates" in w for w in manifest["warnings"])
+
+
+def test_new_label_targets_resolve_in_experiment_grid(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["alpha_research"]["label_targets"] = ["vol_adjusted_forward_return", "cross_sectional_rank"]
+    cfg["alpha_research"]["models"] = ["rule_momentum_30d"]
+    _write_inputs(tmp_path)
+    assert AlphaResearchAgent(cfg).execute(max_retries=1)
+    lb = pd.read_parquet(tmp_path / "data" / "research" / "research_leaderboard.parquet")
+    assert set(lb["label_target"]) == {"vol_adjusted_forward_return", "cross_sectional_rank"}
+
+
 def test_alpha_research_report_renders_without_tabulate(tmp_path):
     # _md_table must degrade gracefully; report contains the Best Experiments section.
     cfg, out = _run(tmp_path)

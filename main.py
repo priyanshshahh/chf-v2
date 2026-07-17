@@ -16,6 +16,9 @@ Usage
   python main.py backtest          # Run BacktestAgent (vectorbt)
   python main.py ablation          # Run ablation study
   python main.py full              # Run entire pipeline end-to-end
+  python main.py nav               # Accounting: reconcile + independent NAV (gross/net)
+  python main.py monitor           # Run all monitoring modules (exit 1 on alert)
+  python main.py letter            # Generate the institutional monthly letter
   python main.py serve             # Start FastAPI server
   python main.py schedule          # Start APScheduler daemon
   python main.py demo              # Generate demo data for dashboard
@@ -538,6 +541,94 @@ def cmd_full(args):
         sys.exit(1)
 
 
+def cmd_papertrade(args):
+    """Run one daily paper-trading cycle over the configured books."""
+    from papertrade.engine import run_papertrade
+    config_path = args.config or "configs/run_config.yaml"
+    books = None
+    if getattr(args, "books", None):
+        books = [b.strip() for b in args.books.split(",") if b.strip()]
+    manifest = run_papertrade(config_path, as_of=getattr(args, "as_of", None), books=books)
+    ok = 0
+    for name, info in manifest.get("books", {}).items():
+        line = (
+            f"[papertrade] {name}: status={info['status']} "
+            f"nav={info['nav']} fills={info['n_fills']} rebalanced={info.get('rebalanced')}"
+        )
+        if info.get("skip_reason"):
+            line += f" reason={info['skip_reason']}"
+        else:
+            ok += 1
+        print(line)
+    print(f"[papertrade] Done. as_of={manifest.get('as_of')} ok={ok}/{len(manifest.get('books', {}))}")
+
+
+def cmd_nav(args):
+    """Run dual-book reconciliation, then the independent accounting NAV (all books)."""
+    from accounting import nav as accounting_nav
+    from accounting import reconcile as accounting_reconcile
+
+    rc = accounting_reconcile.main([])
+    if rc != 0:
+        print("[nav] ERROR: reconciliation reported a NAV break (see data/accounting/reconciliation_report.json).")
+        sys.exit(1)
+    print("[nav] Reconciliation OK (data/accounting/reconciliation_report.json).")
+    rc = accounting_nav.main([])
+    if rc != 0:
+        print("[nav] ERROR: accounting NAV build failed (empty ledger? run reconcile first).")
+        sys.exit(1)
+    print("[nav] Done. NAV series written to data/accounting/nav_<book>.parquet (gross + net-of-fees).")
+
+
+def cmd_monitor(args):
+    """Run every monitoring module in sequence; exit 1 if any module alerts."""
+    import importlib
+    import json as _json
+
+    modules = [
+        "data_quality",
+        "signal_health",
+        "execution_quality",
+        "model_decay",
+        "risk_report",
+        "shadow_nav",
+        "watchdog",
+        "champion_challenger",
+    ]
+    reports_dir = PROJECT_ROOT / "data" / "reports" / "monitoring"
+    any_alert = False
+    for name in modules:
+        mod = importlib.import_module(f"monitoring.{name}")
+        rc = mod.main([])
+        status, n_alerts = "unknown", 0
+        report_path = reports_dir / f"{name}.json"
+        if report_path.exists():
+            try:
+                report = _json.loads(report_path.read_text(encoding="utf-8"))
+                status = str(report.get("status", "unknown"))
+                n_alerts = len(report.get("alerts") or [])
+            except (ValueError, OSError):
+                pass
+        alerted = rc != 0
+        any_alert = any_alert or alerted
+        print(f"[monitor] {name}: status={status} alerts={n_alerts} exit={rc}"
+              + (" ALERT" if alerted else ""))
+    if any_alert:
+        print("[monitor] Done with ALERTS. Reports: data/reports/monitoring/*.json")
+        sys.exit(1)
+    print("[monitor] Done. All monitors clean. Reports: data/reports/monitoring/*.json")
+
+
+def cmd_letter(args):
+    """Generate the institutional monthly letter (virtual paper books)."""
+    from reports.monthly_letter import main as letter_main
+
+    rc = letter_main(["--month", args.month] if getattr(args, "month", None) else [])
+    if rc != 0:
+        print("[letter] ERROR: monthly letter generation failed.")
+        sys.exit(1)
+
+
 def cmd_serve(args):
     import uvicorn
     print("[serve] Starting FastAPI server on http://0.0.0.0:8000")
@@ -554,6 +645,54 @@ def cmd_demo(args):
     """Generate canonical synthetic demo data so the dashboard and tests can load."""
     cfg = _command_cfg(args)
     generate_demo_artifacts(cfg)
+
+
+def cmd_orchestrate(args):
+    """Run the agentic orchestration layer (plan -> risk-check -> execute -> report)."""
+    from orchestration import supervisor as orch_supervisor
+
+    config_path = args.config or "configs/run_config.yaml"
+
+    if getattr(args, "list_pending", False):
+        pending = orch_supervisor.list_pending(config_path=config_path)
+        if not pending:
+            print("[orchestrate] No pending approvals.")
+        else:
+            print(f"[orchestrate] Pending approvals ({len(pending)}):")
+            for a in pending:
+                print(f"  - step_id={a.step_id} stage={a.stage} goal={a.goal} "
+                      f"created={a.created_utc} reason={a.reason}")
+        return
+
+    if getattr(args, "approve", None):
+        approval = orch_supervisor.approve(args.approve, config_path=config_path)
+        if approval is None:
+            print(f"[orchestrate] ERROR: no approval record found for step_id={args.approve}. "
+                  f"Run a plan (e.g. --dry-run) first to register it.")
+            sys.exit(1)
+        print(f"[orchestrate] Approved step_id={approval.step_id} "
+              f"(approval_id={approval.approval_id}).")
+        return
+
+    if not getattr(args, "goal", None):
+        print("[orchestrate] ERROR: --goal is required "
+              "(one of: refresh_data, refresh_research, daily_ops, full_rebuild), "
+              "or use --approve STEP_ID / --list-pending.")
+        sys.exit(1)
+
+    result = orch_supervisor.run_goal(
+        args.goal,
+        config_path=config_path,
+        force=bool(getattr(args, "force", False)),
+        dry_run=bool(getattr(args, "dry_run", False)),
+    )
+    print(result["report"])
+    print(f"[orchestrate] Report written to {result['report_path']}")
+    if not result["dry_run"]:
+        failed = [r for r in result["records"] if r.status == "failed"]
+        if failed:
+            print(f"[orchestrate] ERROR: {len(failed)} step(s) failed.")
+            sys.exit(1)
 
 
 def main():
@@ -583,9 +722,33 @@ def main():
     add_stage_parser("alpha_research", "Run AlphaResearchAgent")
     add_stage_parser("ablation", "Run ablation study")
     add_stage_parser("full", "Run full pipeline end-to-end")
+    papertrade_parser = add_stage_parser("papertrade", "Run daily paper-trading engine")
+    papertrade_parser.add_argument("--as-of", dest="as_of", default=None, help="Run date YYYY-MM-DD (default: today UTC)")
+    papertrade_parser.add_argument("--books", default=None, help="Comma-separated book names (default: all)")
+    add_stage_parser("nav", "Run accounting reconciliation + independent NAV (all books)")
+    add_stage_parser("monitor", "Run all monitoring modules (exit 1 on any alert)")
+    letter_parser = add_stage_parser("letter", "Generate the institutional monthly letter")
+    letter_parser.add_argument("--month", default=None, help="Letter month YYYY-MM (default: latest)")
     add_stage_parser("serve", "Start FastAPI server")
     add_stage_parser("schedule", "Start APScheduler daemon")
     add_stage_parser("demo", "Generate demo data for dashboard")
+    orchestrate_parser = subparsers.add_parser(
+        "orchestrate", help="Run the agentic orchestration layer"
+    )
+    orchestrate_parser.add_argument("--config", default=None, help="Path to run_config.yaml")
+    orchestrate_parser.add_argument(
+        "--goal", default=None,
+        choices=["refresh_data", "refresh_research", "daily_ops", "full_rebuild"],
+        help="Orchestration goal",
+    )
+    orchestrate_parser.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                    help="Print the plan + approval requirements without executing")
+    orchestrate_parser.add_argument("--force", action="store_true",
+                                    help="Re-run stages even when artifacts are fresh")
+    orchestrate_parser.add_argument("--approve", default=None, metavar="STEP_ID",
+                                    help="Approve a pending step (e.g. daily_ops:model)")
+    orchestrate_parser.add_argument("--list-pending", dest="list_pending", action="store_true",
+                                    help="List pending approval records")
 
     args = parser.parse_args()
 
@@ -603,9 +766,14 @@ def main():
         "alpha_research": cmd_alpha_research,
         "ablation": cmd_ablation,
         "full": cmd_full,
+        "papertrade": cmd_papertrade,
+        "nav": cmd_nav,
+        "monitor": cmd_monitor,
+        "letter": cmd_letter,
         "serve": cmd_serve,
         "schedule": cmd_schedule,
         "demo": cmd_demo,
+        "orchestrate": cmd_orchestrate,
     }
 
     if args.command is None:

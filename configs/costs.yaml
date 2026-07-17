@@ -1,0 +1,41 @@
+# Project CHF transaction-cost model configuration.
+#
+# Consumed by portfolio/cost_model.py (deterministic, NO LLM). This replaces the
+# flat 20 bps assumption with a realistic, size/liquidity-aware cost:
+#
+#   cost_bps = fee_bps + spread_bps + impact_bps
+#   participation = trade_notional / ADV
+#   impact_bps    = impact_k * sqrt(participation)         (square-root model)
+#
+# NOTE: configs/risk.yaml is owned by another agent. Cost parameters live here on
+# purpose and must not be merged into risk.yaml or run_config.yaml.
+
+costs:
+  # Exchange taker fee, one side, in basis points (bps). Typical crypto taker
+  # fee ~ 4-10 bps; 10 bps is a conservative default for a paper fund.
+  fee_bps: 10.0
+
+  # Half-spread paid on execution, in bps. Represents the cost of crossing the
+  # book for a liquid top-100 asset. Widen for illiquid names.
+  spread_bps: 5.0
+
+  # Square-root market-impact coefficient, expressed in basis points. Impact is
+  #   impact_bps = impact_k * sqrt(participation)
+  # so impact_k IS the impact (in bps) of a trade equal to 100% of ADV
+  # (participation = 1 -> sqrt = 1). Calibration reference points at impact_k=100:
+  #   participation 0.01 (1% of ADV)   -> 100 * 0.1  =  10 bps
+  #   participation 0.25 (25% of ADV)  -> 100 * 0.5  =  50 bps
+  #   participation 1.00 (100% of ADV) -> 100 * 1.0  = 100 bps
+  impact_k: 100.0
+
+  # ADV (average daily dollar volume) estimation window, in trading days.
+  adv_window_days: 30
+
+  # Floor on ADV (USD) used when an asset has thin/zero history, to avoid a
+  # divide-by-zero / infinite-impact blow-up. Trades on assets below this are
+  # treated as maximally illiquid at the cap below.
+  adv_floor_usd: 100000.0
+
+  # Hard cap on total modelled cost (bps). Guards against pathological
+  # participation (trade_notional >> ADV) producing absurd costs.
+  max_cost_bps: 500.0

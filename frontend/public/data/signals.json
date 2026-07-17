@@ -1,0 +1,28 @@
+{
+  "as_of": "2024-07-03",
+  "model": "lightgbm",
+  "horizon_days": 7,
+  "note": "Forward-looking signal ranks only. Realized returns withheld (leakage-safe).",
+  "rows": [
+    {
+      "symbol": "ADA",
+      "predicted_return": 0.031149260642451795
+    },
+    {
+      "symbol": "BTC",
+      "predicted_return": -0.006270949309575266
+    },
+    {
+      "symbol": "SOL",
+      "predicted_return": -0.007493302907606357
+    },
+    {
+      "symbol": "BNB",
+      "predicted_return": -0.021505390725225743
+    },
+    {
+      "symbol": "ETH",
+      "predicted_return": -0.027522717643013533
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "strategy": "score_weighted_long_only",
+  "as_of": "2026-05-12",
+  "latest_weights": [
+    {
+      "symbol": "SUI",
+      "weight": 0.15
+    },
+    {
+      "symbol": "XRP",
+      "weight": 0.15
+    },
+    {
+      "symbol": "TRX",
+      "weight": 0.12902003062046913
+    },
+    {
+      "symbol": "HYPE",
+      "weight": 0.1257567738153057
+    },
+    {
+      "symbol": "TON",
+      "weight": 0.11542017936658665
+    },
+    {
+      "symbol": "XMR",
+      "weight": 0.11149213661248596
+    },
+    {
+      "symbol": "ONDO",
+      "weight": 0.10314753587180882
+    },
+    {
+      "symbol": "VVV",
+      "weight": 0.08972118362700397
+    },
+    {
+      "symbol": "XDC",
+      "weight": 0.012939842948255063
+    },
+    {
+      "symbol": "AVAX",
+      "weight": 0.011174498327069732
+    },
+    {
+      "symbol": "NEAR",
+      "weight": 0.001327818811014866
+    }
+  ],
+  "series": [
+    {
+      "date": "2025-05-13",
+      "turnover": 0.75,
+      "positions": 5
+    },
+    {
+      "date": "2025-05-20",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-06-03",
+      "turnover": 0.75,
+      "positions": 5
+    },
+    {
+      "date": "2025-06-10",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-06-17",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-06-24",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-07-01",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-07-08",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-07-15",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-07-22",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-07-29",
+      "turnover": 0.0,
+      "positions": 5
+    },
+    {
+      "date": "2025-08-05",
+      "turnover": 0.14999999999999994,
+      "positions": 6
+    },
+    {
+      "date": "2025-08-12",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-08-19",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-08-26",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-09-02",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-09-09",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-09-16",
+      "turnover": 1.6653345369377348e-16,
+      "positions": 6
+    },
+    {
+      "date": "2025-09-23",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-09-30",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-10-07",
+      "turnover": 1.6653345369377348e-16,
+      "positions": 6
+    },
+    {
+      "date": "2025-10-14",
+      "turnover": 2.7755575615628914e-17,
+      "positions": 5
+    },
+    {
+      "date": "2025-10-21",
+      "turnover": 0.14999999999999994,
+      "positions": 6
+    },
+    {
+      "date": "2025-10-28",
+      "turnover": 0.0,
+      "positions": 6
+    },
+    {
+      "date": "2025-11-04",
+      "turnover": 1.1102230246251565e-16,
+      "positions": 5
+    },
+    {
+      "date": "2026-05-12",
+      "turnover": 0.9999999999999999,
+      "positions": 11
+    }
+  ],
+  "n_strategies": 9,
+  "allocation_mode": "diagnostic_not_live_trading"
+}

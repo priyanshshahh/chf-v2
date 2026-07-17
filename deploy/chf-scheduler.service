@@ -1,0 +1,39 @@
+# Project CHF scheduler — systemd unit for a Linux VM.
+#
+# Install:
+#   sudo cp deploy/chf-scheduler.service /etc/systemd/system/chf-scheduler.service
+#   # edit User/WorkingDirectory/EnvironmentFile below to match your host
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now chf-scheduler
+#   journalctl -u chf-scheduler -f          # follow logs
+#
+# Secrets (SMTP_*, WEBHOOK_URL, API keys) live in the EnvironmentFile, NOT here.
+[Unit]
+Description=Project CHF operational scheduler (paper fund)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chf
+Group=chf
+WorkingDirectory=/opt/chf
+# Load secrets/config from a root-owned, 0600 env file.
+EnvironmentFile=/opt/chf/.env
+Environment=TZ=UTC
+Environment=PYTHONUNBUFFERED=1
+# Use the project venv interpreter. NOTE: call the interpreter directly with -m;
+# do NOT use .venv/bin/pip (it is broken in this project — see deploy/README.md).
+ExecStart=/opt/chf/.venv/bin/python -m jobs.scheduler
+# Restart on crash with a short backoff; StartLimit prevents a hot crash loop.
+Restart=on-failure
+RestartSec=15
+StartLimitIntervalSec=300
+StartLimitBurst=5
+# Basic hardening.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

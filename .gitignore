@@ -59,7 +59,18 @@ coinmarketcap_data/**/*
 coinmarketcap_extract/raw_daily_json/
 coinmarketcap_extract/processed/
 coinmarketcap_extract/*.log
+cmc_all_data.zip
+cmc_for_professor.zip
+cmc_all_data/
+cmc_complete/
 
 # Local test/reference fixtures
 repo_status_after_phase6.txt
 .universe_golden_ref/
+
+# Local-only agent/tooling artifacts and runtime state (regenerated locally)
+graphify-out/
+scratchpad_logs/
+docs/superpowers/
+.specify/
+memory/

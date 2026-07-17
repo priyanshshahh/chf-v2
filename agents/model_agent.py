@@ -10,6 +10,7 @@ import pandas as pd
 
 from agents.base import AgentBase
 from features.feature_engineering import ALLOWED_PROHIBITED_EXACT
+from features.feature_source_map import FEATURE_SOURCE_MAP_FILENAME, load_feature_source_map
 from models.walk_forward import generate_purged_walk_forward_splits, summarize_predictions
 
 
@@ -103,6 +104,14 @@ class ModelAgent(AgentBase):
         self.override_models = model_names
         self._dataset: Optional[pd.DataFrame] = None
         self._feature_keep_list: List[str] = []
+        self._feature_source_map: Dict[str, str] = {}
+        self._optuna_results: Dict[str, Dict[str, Any]] = {}
+        self._stacking_results: Dict[str, Dict[str, Any]] = {}
+        self._meta_labeling_results: Dict[str, Dict[str, Any]] = {}
+        self._regime_results: Dict[str, Dict[str, Any]] = {}
+        self._regime_map: Optional[Dict[Any, str]] = None
+        self._advanced_cfg_loaded: bool = False
+        self._advanced_cfg_path: Optional[str] = None
         self._feature_manifest: Dict[str, Any] = {}
         self._label_manifest: Dict[str, Any] = {}
         self._warnings: List[str] = []
@@ -200,7 +209,75 @@ class ModelAgent(AgentBase):
         if keep_path.exists():
             keep = json.load(open(keep_path))
             self._feature_keep_list = keep.get("kept_features", []) or keep.get("keep_list", []) or []
+        # Explicit per-column source tags emitted by FeatureAgent (or the backfill script).
+        # When present, feature-set membership comes from this map; the legacy
+        # ONCHAIN_HINTS substring heuristic is only a fallback for unmapped columns.
+        source_map_path = _resolve(
+            self._project_root,
+            cfg.get("feature_source_map_path", f"data/features/{FEATURE_SOURCE_MAP_FILENAME}"),
+        )
+        self._feature_source_map = load_feature_source_map(source_map_path) or {}
+        if self._feature_source_map:
+            self.logger.info("Loaded explicit feature source map (%s columns) from %s", len(self._feature_source_map), source_map_path)
+        else:
+            self.logger.info("No feature source map at %s; falling back to ONCHAIN_HINTS substring classification", source_map_path)
+        self._maybe_load_advanced_config()
         self.logger.info("ModelAgent prepared | rows=%s symbols=%s", len(self._dataset), self._dataset["symbol"].nunique())
+
+    def _maybe_load_advanced_config(self) -> None:
+        """Optionally merge ``configs/modeling_advanced.yaml`` into ``self._model_cfg``.
+
+        LEAKAGE / REPRODUCIBILITY: this is default-OFF. The advanced config is loaded
+        ONLY when the operator opts in via the ``CHF_MODELING_ADVANCED`` environment
+        variable (truthy) or the ``modeling.load_advanced_config`` config flag, so the
+        canonical ``main.py model`` run is byte-identical and reproducible without it.
+        The file's ``modeling_advanced`` block (extra model names, xgboost/catboost
+        params, stacking / regime_conditional / meta_labeling knobs) is shallow-merged
+        onto ``self._model_cfg``; CLI ``--models`` overrides always win. Tests exercise
+        the same knobs by setting ``cfg['modeling']`` directly, so they never touch this
+        file (their tmp project root has no such file)."""
+        import os
+
+        opt_in = str(os.getenv("CHF_MODELING_ADVANCED", "")).strip().lower() in {"1", "true", "yes", "on"}
+        opt_in = opt_in or bool(self._model_cfg.get("load_advanced_config", False))
+        if not opt_in:
+            return
+        raw = os.getenv("CHF_MODELING_ADVANCED_CONFIG") or self._model_cfg.get(
+            "advanced_config_path", "configs/modeling_advanced.yaml"
+        )
+        adv_path = _resolve(self._project_root, raw)
+        if not adv_path.exists():
+            self._warnings.append(f"advanced_config_not_found:{adv_path}")
+            return
+        try:
+            import yaml
+
+            with open(adv_path, "r") as fh:
+                doc = yaml.safe_load(fh) or {}
+        except Exception as exc:  # pragma: no cover - defensive
+            self._warnings.append(f"advanced_config_load_failed:{exc}")
+            return
+        block = dict(doc.get("modeling_advanced", {}) or {})
+        if not bool(block.get("enabled", False)):
+            self._warnings.append(f"advanced_config_present_but_disabled:{adv_path}")
+            return
+        extra = list(block.pop("extra_model_names", []) or [])
+        for key, value in block.items():
+            if key == "enabled":
+                continue
+            self._model_cfg[key] = value
+        # CLI --models wins; otherwise append the advanced models (deduped, order-stable).
+        if not self.override_models:
+            base_models = list(self._model_cfg.get("model_names", []))
+            for name in extra:
+                if name not in base_models:
+                    base_models.append(name)
+            self._model_cfg["model_names"] = base_models
+        self._advanced_cfg_loaded = True
+        self._advanced_cfg_path = str(adv_path)
+        self.logger.info(
+            "Loaded advanced modeling config from %s | model_names=%s", adv_path, self._model_cfg.get("model_names")
+        )
 
     def run(self) -> Dict[str, Any]:
         cfg = self._model_cfg
@@ -297,6 +374,11 @@ class ModelAgent(AgentBase):
             candidates = [c for c in candidates if c not in DIAGNOSTIC_FEATURE_COLUMNS]
 
         def is_onchain(col: str) -> bool:
+            # Explicit source tag (FeatureAgent / backfill) wins; legacy substring
+            # hints only classify columns the map does not know about.
+            tagged = self._feature_source_map.get(col)
+            if tagged is not None:
+                return tagged == "onchain"
             lower = col.lower()
             return any(hint in lower for hint in ONCHAIN_HINTS)
 
@@ -311,15 +393,26 @@ class ModelAgent(AgentBase):
             selected = candidates
         return sorted(selected)
 
-    def _build_model(self, model_name: str):
+    def _build_model(self, model_name: str, param_overrides: Optional[Dict[str, Any]] = None):
+        """Build the estimator for ``model_name`` from static config hyperparameters,
+        optionally overridden per-key by ``param_overrides`` (e.g. Optuna best params)."""
         cfg = self._model_cfg
         seed = int(cfg.get("random_seed", 42))
+        overrides = param_overrides or {}
         if model_name == "baseline_cross_sectional_mean":
             return BaselineCrossSectionalMean()
+        if model_name == "linear_ridge":
+            from sklearn.linear_model import Ridge
+
+            ridge = {**cfg.get("linear_ridge", {}), **overrides}
+            return Ridge(
+                alpha=float(ridge.get("alpha", 10.0)),
+                solver=ridge.get("solver", "lsqr"),
+            )
         if model_name == "random_forest":
             from sklearn.ensemble import RandomForestRegressor
 
-            rf = cfg.get("random_forest", {})
+            rf = {**cfg.get("random_forest", {}), **overrides}
             return RandomForestRegressor(
                 n_estimators=int(rf.get("n_estimators", 300)),
                 max_depth=int(rf.get("max_depth", 6)),
@@ -333,7 +426,7 @@ class ModelAgent(AgentBase):
                 import lightgbm as lgb
             except Exception:
                 raise ModelAgentError("lightgbm_unavailable")
-            lcfg = cfg.get("lightgbm", {})
+            lcfg = {**cfg.get("lightgbm", {}), **overrides}
             return lgb.LGBMRegressor(
                 n_estimators=int(lcfg.get("n_estimators", 500)),
                 learning_rate=float(lcfg.get("learning_rate", 0.03)),
@@ -348,6 +441,46 @@ class ModelAgent(AgentBase):
                 n_jobs=int(lcfg.get("n_jobs", -1)),
                 verbose=int(lcfg.get("verbose", -1)),
                 random_state=seed,
+            )
+        if model_name == "xgboost":
+            try:
+                import xgboost as xgb
+            except Exception:
+                raise ModelAgentError("xgboost_unavailable")
+            xcfg = {**cfg.get("xgboost", {}), **overrides}
+            return xgb.XGBRegressor(
+                n_estimators=int(xcfg.get("n_estimators", 400)),
+                learning_rate=float(xcfg.get("learning_rate", 0.03)),
+                max_depth=int(xcfg.get("max_depth", 5)),
+                min_child_weight=float(xcfg.get("min_child_weight", 5.0)),
+                subsample=float(xcfg.get("subsample", 0.8)),
+                colsample_bytree=float(xcfg.get("colsample_bytree", 0.8)),
+                reg_alpha=float(xcfg.get("reg_alpha", 0.1)),
+                reg_lambda=float(xcfg.get("reg_lambda", 1.0)),
+                gamma=float(xcfg.get("gamma", 0.0)),
+                objective=xcfg.get("objective", "reg:squarederror"),
+                tree_method=xcfg.get("tree_method", "hist"),
+                n_jobs=int(xcfg.get("n_jobs", -1)),
+                verbosity=int(xcfg.get("verbosity", 0)),
+                random_state=seed,
+            )
+        if model_name == "catboost":
+            try:
+                from catboost import CatBoostRegressor
+            except Exception:
+                raise ModelAgentError("catboost_unavailable")
+            ccfg = {**cfg.get("catboost", {}), **overrides}
+            return CatBoostRegressor(
+                iterations=int(ccfg.get("iterations", ccfg.get("n_estimators", 400))),
+                learning_rate=float(ccfg.get("learning_rate", 0.03)),
+                depth=int(ccfg.get("depth", ccfg.get("max_depth", 6))),
+                l2_leaf_reg=float(ccfg.get("l2_leaf_reg", 3.0)),
+                subsample=float(ccfg.get("subsample", 0.8)),
+                loss_function=ccfg.get("loss_function", "RMSE"),
+                random_seed=seed,
+                thread_count=int(ccfg.get("thread_count", -1)),
+                allow_writing_files=False,
+                verbose=0,
             )
         raise ModelAgentError(f"unknown_model:{model_name}")
 
@@ -381,6 +514,559 @@ class ModelAgent(AgentBase):
             self.logger.warning(f"SHAP computation skipped (non-fatal) for {type(model).__name__}: {exc}")
             return None
 
+    # ------------------------------------------------------------------
+    # Optuna hyperparameter search (NEXT_STEPS item [3])
+    # ------------------------------------------------------------------
+    def _optuna_cfg(self) -> Dict[str, Any]:
+        return self._model_cfg.get("optuna", {}) or {}
+
+    def _optuna_enabled_for(self, model_name: str) -> bool:
+        ocfg = self._optuna_cfg()
+        if not bool(ocfg.get("enabled", False)):
+            return False
+        return model_name in list(ocfg.get("models", ["lightgbm", "random_forest"]))
+
+    def _suggest_optuna_params(self, trial, model_name: str) -> Dict[str, Any]:
+        """Bounded, deterministic-order search spaces around the static defaults."""
+        if model_name == "random_forest":
+            return {
+                "n_estimators": trial.suggest_int("n_estimators", 50, 400),
+                "max_depth": trial.suggest_int("max_depth", 3, 10),
+                "min_samples_leaf": trial.suggest_int("min_samples_leaf", 5, 50),
+                "max_features": trial.suggest_float("max_features", 0.3, 1.0),
+            }
+        if model_name == "lightgbm":
+            return {
+                "n_estimators": trial.suggest_int("n_estimators", 50, 500),
+                "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
+                "max_depth": trial.suggest_int("max_depth", 3, 8),
+                "num_leaves": trial.suggest_int("num_leaves", 15, 127),
+                "min_child_samples": trial.suggest_int("min_child_samples", 10, 60),
+                "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+                "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+            }
+        raise ModelAgentError(f"optuna_unsupported_model:{model_name}")
+
+    def _tune_hyperparameters_optuna(
+        self,
+        *,
+        panel: pd.DataFrame,
+        label_col: str,
+        horizon: int,
+        feature_set: str,
+        model_name: str,
+        feature_cols: List[str],
+        outer_splits: List[Any],
+        wf: Dict[str, Any],
+        purge_days: int,
+        embargo_days: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Leakage-safe Optuna study for one (model, feature_set, horizon) combination.
+
+        LEAKAGE SAFETY: hyperparameters are tuned using ONLY training-window data.
+        The tuning panel is sliced to dates <= the earliest outer fold's *purged*
+        train end (``min(split.train_end_purged)``), which by construction of the
+        purged walk-forward precedes every outer test window. An inner purged +
+        embargoed walk-forward (same ``purge_days`` / ``embargo_days`` as the outer
+        folds, via ``models.walk_forward.generate_purged_walk_forward_splits``) is
+        then built inside that slice, and each trial is scored by the configured
+        objective (default: mean rank-IC) on the inner validation folds. Outer
+        test-window rows are therefore never seen during tuning; this is enforced
+        with an explicit date assertion below, and the tuning boundary dates are
+        recorded in the manifest under ``optuna_best_params``.
+
+        Deterministic: TPE sampler seeded from ``modeling.random_seed``, and the
+        underlying estimators reuse the same seed via ``_build_model``.
+
+        Returns the best params dict (config overrides), or ``None`` when tuning
+        is not possible (optuna missing / no inner folds) — the static config
+        hyperparameters are then used unchanged (non-fatal degradation).
+        """
+        ocfg = self._optuna_cfg()
+        combo_key = f"{model_name}|{feature_set}|{int(horizon)}"
+        try:
+            import optuna
+        except Exception as exc:  # pragma: no cover - optuna is in requirements
+            self._warnings.append(f"optuna_unavailable_for:{combo_key}:{exc}")
+            return None
+
+        seed = int(self._model_cfg.get("random_seed", 42))
+        objective_metric = str(ocfg.get("objective_metric", "rank_ic_mean"))
+        n_trials = int(ocfg.get("n_trials", 25))
+
+        # --- slice to training-window data only (never outer test rows) ---
+        first_test_start = min(split.test_start for split in outer_splits)
+        tuning_end = min(split.train_end_purged for split in outer_splits)
+        dates = pd.to_datetime(panel["date_ts"], utc=True)
+        tuning_panel = panel[dates <= tuning_end].copy().reset_index(drop=True)
+        if tuning_panel.empty:
+            self._warnings.append(f"optuna_empty_tuning_window:{combo_key}")
+            return None
+        tuning_max_date = pd.to_datetime(tuning_panel["date_ts"], utc=True).max()
+        if tuning_max_date >= first_test_start:
+            raise ModelAgentError(
+                f"optuna_tuning_window_overlaps_test:{combo_key}:{tuning_max_date}>={first_test_start}"
+            )
+
+        inner_wf = {**wf, **(ocfg.get("inner_walk_forward", {}) or {})}
+        inner_initial = int(
+            inner_wf.get(
+                "inner_initial_train_days",
+                max(int(inner_wf.get("initial_train_days", 504)) // 2, 30),
+            )
+        )
+        inner_splits = list(
+            generate_purged_walk_forward_splits(
+                tuning_panel,
+                date_col="date_ts",
+                symbol_col="symbol",
+                horizon_days=int(horizon),
+                initial_train_days=inner_initial,
+                test_days=int(inner_wf.get("test_days", 30)),
+                step_days=int(inner_wf.get("step_days", 30)),
+                purge_days=purge_days,
+                embargo_days=embargo_days,
+                min_train_rows=int(inner_wf.get("min_train_rows", 1000)),
+                min_test_rows=int(inner_wf.get("min_test_rows", 100)),
+                min_test_symbols=int(inner_wf.get("min_test_symbols", self._model_cfg.get("min_test_symbols_per_date", 10))),
+            )
+        )
+        if not inner_splits:
+            self._warnings.append(f"optuna_no_inner_folds:{combo_key}")
+            return None
+
+        def objective(trial) -> float:
+            params = self._suggest_optuna_params(trial, model_name)
+            frames: List[pd.DataFrame] = []
+            for split in inner_splits:
+                train = tuning_panel.iloc[split.train_idx]
+                test = tuning_panel.iloc[split.test_idx]
+                y_train = pd.to_numeric(train[label_col], errors="coerce")
+                y_test = pd.to_numeric(test[label_col], errors="coerce")
+                valid_train = np.isfinite(y_train.to_numpy(dtype="float64", na_value=np.nan))
+                valid_test = np.isfinite(y_test.to_numpy(dtype="float64", na_value=np.nan))
+                train = train.loc[valid_train]
+                test = test.loc[valid_test]
+                y_train = y_train.loc[valid_train]
+                y_test = y_test.loc[valid_test]
+                if train.empty or test.empty:
+                    continue
+                X_train_raw = train[feature_cols].replace([np.inf, -np.inf], np.nan)
+                X_test_raw = test[feature_cols].replace([np.inf, -np.inf], np.nan)
+                medians = X_train_raw.median(numeric_only=True).replace([np.inf, -np.inf], np.nan)
+                X_train = X_train_raw.fillna(medians).fillna(0.0)
+                X_test = X_test_raw.fillna(medians).fillna(0.0)
+                model = self._build_model(model_name, params)
+                model.fit(X_train, y_train)
+                fold_pred = test[["date_ts", "symbol"]].copy()
+                fold_pred["fold_id"] = split.fold_id
+                fold_pred["prediction"] = np.asarray(model.predict(X_test), dtype=float)
+                fold_pred["actual_forward_return"] = y_test.to_numpy()
+                frames.append(fold_pred)
+            if not frames:
+                return -999.0
+            pooled = pd.concat(frames, ignore_index=True)
+            summary = summarize_predictions(pooled, n_features=len(feature_cols))
+            value = summary.get(objective_metric)
+            value = float(value) if value is not None and np.isfinite(value) else -999.0
+            return value
+
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        sampler = optuna.samplers.TPESampler(seed=seed)
+        study = optuna.create_study(direction="maximize", sampler=sampler)
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+        best_params = dict(study.best_params)
+        self._optuna_results[combo_key] = {
+            "model_name": model_name,
+            "feature_set": feature_set,
+            "horizon_days": int(horizon),
+            "best_params": best_params,
+            "best_value": float(study.best_value),
+            "objective_metric": objective_metric,
+            "n_trials": n_trials,
+            "inner_fold_count": len(inner_splits),
+            "inner_initial_train_days": inner_initial,
+            "purge_days": int(purge_days),
+            "embargo_days": int(embargo_days),
+            "tuning_data_max_date": tuning_max_date.isoformat(),
+            "outer_first_test_start": pd.Timestamp(first_test_start).isoformat(),
+            "sampler": "TPESampler",
+            "seed": seed,
+        }
+        self.logger.info(
+            "Optuna best for %s: value=%.6f params=%s (tuning<=%s < first test %s)",
+            combo_key, float(study.best_value), best_params, tuning_max_date.date(), pd.Timestamp(first_test_start).date(),
+        )
+        return best_params
+
+    # ------------------------------------------------------------------
+    # Advanced modeling: stacking / regime-conditional / meta-labeling
+    # (all config-driven, default OFF; strictly walk-forward-safe)
+    # ------------------------------------------------------------------
+    def _model_available(self, model_name: str) -> bool:
+        try:
+            self._build_model(model_name)
+            return True
+        except ModelAgentError:
+            return False
+        except Exception:  # pragma: no cover - defensive
+            return True
+
+    def _meta_cfg(self) -> Dict[str, Any]:
+        mc = self._model_cfg.get("meta_labeling", {})
+        return mc if isinstance(mc, dict) else {}
+
+    def _meta_labeling_enabled(self) -> bool:
+        mc = self._model_cfg.get("meta_labeling")
+        if isinstance(mc, dict):
+            return bool(mc.get("enabled", False))
+        return bool(mc)
+
+    def _regime_conditional_enabled(self) -> bool:
+        rc = self._model_cfg.get("regime_conditional")
+        if isinstance(rc, dict):
+            return bool(rc.get("enabled", False))
+        return bool(rc)
+
+    def _load_regime_map(self) -> Dict[Any, str]:
+        if self._regime_map is not None:
+            return self._regime_map
+        rc = self._model_cfg.get("regime_conditional", {})
+        path = rc.get("regime_path") if isinstance(rc, dict) else None
+        path = path or "data/strategies/regime_daily.parquet"
+        p = _resolve(self._project_root, path)
+        if not p.exists():
+            raise ModelAgentError(f"regime_daily_missing:{p}")
+        rdf = pd.read_parquet(p)
+        if "date_ts" not in rdf.columns or "regime" not in rdf.columns:
+            raise ModelAgentError("regime_daily_missing_columns")
+        rdf["date_ts"] = pd.to_datetime(rdf["date_ts"], utc=True, errors="coerce").dt.normalize()
+        self._regime_map = dict(zip(rdf["date_ts"], rdf["regime"].astype(str)))
+        return self._regime_map
+
+    def _build_meta_model(self):
+        """Binary meta-classifier (predict_proba) for the meta-labeling second stage."""
+        mcfg = self._meta_cfg()
+        seed = int(self._model_cfg.get("random_seed", 42))
+        kind = str(mcfg.get("meta_model", "logistic")).lower()
+        if kind in {"random_forest", "rf"}:
+            from sklearn.ensemble import RandomForestClassifier
+
+            return RandomForestClassifier(
+                n_estimators=int(mcfg.get("n_estimators", 200)),
+                max_depth=int(mcfg.get("max_depth", 5)),
+                min_samples_leaf=int(mcfg.get("min_samples_leaf", 20)),
+                n_jobs=-1,
+                random_state=seed,
+            )
+        if kind == "lightgbm":
+            try:
+                import lightgbm as lgb
+            except Exception:
+                raise ModelAgentError("lightgbm_unavailable")
+            return lgb.LGBMClassifier(
+                n_estimators=int(mcfg.get("n_estimators", 200)),
+                learning_rate=float(mcfg.get("learning_rate", 0.05)),
+                max_depth=int(mcfg.get("max_depth", 5)),
+                verbose=-1,
+                random_state=seed,
+            )
+        from sklearn.linear_model import LogisticRegression
+
+        return LogisticRegression(
+            C=float(mcfg.get("C", 1.0)),
+            max_iter=int(mcfg.get("max_iter", 1000)),
+            random_state=seed,
+        )
+
+    def _inner_oof_splits(self, train: pd.DataFrame, horizon: int, purge_days: int, embargo_days: int):
+        """Purged inner splits of the TRAIN slice for OOF stacking predictions.
+
+        Every returned inner-test window's dates strictly follow the inner-train
+        dates by at least ``purge_days`` (no OOF row leaks into its own base-model
+        training), and — because ``train`` is itself the outer fold's train slice —
+        every OOF date precedes the outer test window."""
+        scfg = self._model_cfg.get("stacking", {}) or {}
+        iwf = scfg.get("inner_walk_forward", {}) or {}
+        dates = np.array(sorted(pd.to_datetime(train["date_ts"], utc=True).unique()))
+        n = len(dates)
+        if n < 3:
+            return []
+        splits = []
+        init = int(iwf.get("initial_train_days", max(n // 2, 2)))
+        test_days = int(iwf.get("test_days", max(n // 5, 1)))
+        step_days = int(iwf.get("step_days", test_days))
+        try:
+            for sp in generate_purged_walk_forward_splits(
+                train,
+                date_col="date_ts",
+                symbol_col="symbol",
+                horizon_days=int(horizon),
+                initial_train_days=init,
+                test_days=test_days,
+                step_days=step_days,
+                purge_days=int(purge_days),
+                embargo_days=int(iwf.get("embargo_days", 0)),
+                min_train_rows=int(iwf.get("min_train_rows", 1)),
+                min_test_rows=int(iwf.get("min_test_rows", 1)),
+                min_test_symbols=int(iwf.get("min_test_symbols", 1)),
+            ):
+                splits.append((sp.train_idx, sp.test_idx))
+        except Exception:  # pragma: no cover - defensive
+            splits = []
+        if splits:
+            return splits
+        # Fallback: a single purged holdout so stacking still gets OOF base preds.
+        frac = float(scfg.get("inner_holdout_frac", 0.7))
+        cut = dates[max(int(n * frac) - 1, 0)]
+        test_start = pd.Timestamp(cut) + pd.Timedelta(days=int(purge_days) + 1)
+        d = pd.to_datetime(train["date_ts"], utc=True)
+        tr = np.flatnonzero((d <= cut).to_numpy())
+        te = np.flatnonzero((d >= test_start).to_numpy())
+        if len(tr) >= 2 and len(te) >= 1:
+            return [(tr, te)]
+        return []
+
+    def _fit_meta_learner(self, oof: np.ndarray, y: np.ndarray, learner: str):
+        """Fit the stacking meta-learner on OOF base predictions (train-only).
+
+        Returns ``(predict_fn, weights)``. ``learner='nnls'`` uses non-negative
+        least squares (convex, non-negative blend); anything else uses ridge."""
+        learner = str(learner).lower()
+        if learner in {"nnls", "non_negative_least_squares"}:
+            from scipy.optimize import nnls
+
+            coef, _ = nnls(oof, y)
+            return (lambda M: np.asarray(M) @ coef), np.asarray(coef, dtype=float)
+        from sklearn.linear_model import Ridge
+
+        scfg = self._model_cfg.get("stacking", {}) or {}
+        ridge = Ridge(alpha=float(scfg.get("meta_alpha", 1.0)), positive=bool(scfg.get("meta_positive", False)))
+        ridge.fit(oof, y)
+        return (lambda M: ridge.predict(M)), np.asarray(ridge.coef_, dtype=float)
+
+    def _stacked_predict(self, *, base_models, meta_learner, train, test, X_train, X_test, y_train,
+                         feature_cols, optuna_params, horizon, purge_days, embargo_days, combo_key, split):
+        avail = [m for m in base_models if m not in {"stacked_ensemble", "baseline_cross_sectional_mean"} and self._model_available(m)]
+        skipped = [m for m in base_models if m not in avail]
+        if skipped:
+            self._warnings.append(f"stacking_base_models_unavailable:{combo_key}:{skipped}")
+        if len(avail) < 1:
+            raise ModelAgentError(f"stacking_no_base_models:{combo_key}")
+        inner = self._inner_oof_splits(train, horizon, purge_days, embargo_days)
+        y_train_arr = pd.to_numeric(y_train, errors="coerce")
+        # Refit each base model on the full outer-train slice for test-time predictions.
+        base_test_cols = []
+        for m in avail:
+            mdl = self._build_model(m, optuna_params)
+            mdl.fit(X_train, y_train_arr)
+            base_test_cols.append(np.asarray(mdl.predict(X_test), dtype=float))
+        base_test = np.column_stack(base_test_cols)
+
+        oof_X_parts, oof_y_parts, oof_dates = [], [], []
+        for tr_idx, te_idx in inner:
+            Xtr = X_train.iloc[tr_idx]
+            ytr = y_train_arr.iloc[tr_idx]
+            Xte = X_train.iloc[te_idx]
+            if len(Xtr) < 2 or len(Xte) < 1:
+                continue
+            cols = []
+            for m in avail:
+                mdl = self._build_model(m, optuna_params)
+                mdl.fit(Xtr, ytr)
+                cols.append(np.asarray(mdl.predict(Xte), dtype=float))
+            oof_X_parts.append(np.column_stack(cols))
+            oof_y_parts.append(y_train_arr.iloc[te_idx].to_numpy(dtype=float))
+            oof_dates.append(pd.to_datetime(train["date_ts"].iloc[te_idx], utc=True).to_numpy())
+
+        entry = {
+            "base_models": avail,
+            "meta_learner": str(meta_learner),
+            "n_base_models": len(avail),
+        }
+        if oof_X_parts:
+            oof = np.vstack(oof_X_parts)
+            oof_y = np.concatenate(oof_y_parts)
+            finite = np.isfinite(oof).all(axis=1) & np.isfinite(oof_y)
+            oof, oof_y = oof[finite], oof_y[finite]
+            if len(oof_y) >= max(2, len(avail)):
+                predict_fn, weights = self._fit_meta_learner(oof, oof_y, meta_learner)
+                final = np.asarray(predict_fn(base_test), dtype=float)
+                oof_max = pd.Timestamp(np.concatenate(oof_dates).max())
+                entry.update({
+                    "meta_weights": {m: float(w) for m, w in zip(avail, weights)},
+                    "oof_rows": int(len(oof_y)),
+                    "oof_max_date": oof_max.isoformat(),
+                    "test_start": pd.Timestamp(split.test_start).isoformat(),
+                    "fold_id": int(split.fold_id),
+                    "fallback_equal_weight": False,
+                })
+                self._stacking_results.setdefault(combo_key, {"folds": []})
+                self._stacking_results[combo_key].setdefault("folds", []).append(entry)
+                self._stacking_results[combo_key].update({k: entry[k] for k in ("base_models", "meta_learner", "n_base_models")})
+                return final
+        # Fallback: equal-weight blend (still train-only; recorded honestly).
+        self._warnings.append(f"stacking_oof_unavailable_equal_weight:{combo_key}")
+        entry.update({
+            "meta_weights": {m: 1.0 / len(avail) for m in avail},
+            "oof_rows": 0,
+            "oof_max_date": None,
+            "test_start": pd.Timestamp(split.test_start).isoformat(),
+            "fold_id": int(split.fold_id),
+            "fallback_equal_weight": True,
+        })
+        self._stacking_results.setdefault(combo_key, {"folds": []})
+        self._stacking_results[combo_key].setdefault("folds", []).append(entry)
+        self._stacking_results[combo_key].update({k: entry[k] for k in ("base_models", "meta_learner", "n_base_models")})
+        return base_test.mean(axis=1)
+
+    def _regime_predict(self, *, model_name, train, test, X_train, X_test, y_train, optuna_params, combo_key, split):
+        reg_map = self._load_regime_map()
+        rc = self._model_cfg.get("regime_conditional", {})
+        min_rows = int(rc.get("min_regime_train_rows", 200)) if isinstance(rc, dict) else 200
+        y_train_arr = pd.to_numeric(y_train, errors="coerce")
+        train_reg = train["date_ts"].map(reg_map).fillna("unknown").to_numpy().astype(object)
+        test_reg = test["date_ts"].map(reg_map).fillna("unknown").to_numpy().astype(object)
+
+        # All-data fallback model (used when a regime has too few train rows).
+        fb = self._build_model(model_name, optuna_params)
+        fb.fit(X_train, y_train_arr)
+        preds = np.asarray(fb.predict(X_test), dtype=float)
+        used = np.array(["_all_data"] * len(test), dtype=object)
+
+        regime_train_counts, regime_models = {}, {}
+        for reg in np.unique(train_reg):
+            mask_tr = train_reg == reg
+            regime_train_counts[str(reg)] = int(mask_tr.sum())
+            if int(mask_tr.sum()) >= min_rows:
+                m = self._build_model(model_name, optuna_params)
+                m.fit(X_train.iloc[mask_tr], y_train_arr.iloc[mask_tr])
+                regime_models[reg] = m
+        for reg, m in regime_models.items():
+            mask_te = test_reg == reg
+            if mask_te.any():
+                preds[mask_te] = np.asarray(m.predict(X_test.iloc[mask_te]), dtype=float)
+                used[mask_te] = str(reg)
+
+        self._regime_results.setdefault(combo_key, {"folds": []})
+        self._regime_results[combo_key]["folds"].append({
+            "fold_id": int(split.fold_id),
+            "test_start": pd.Timestamp(split.test_start).isoformat(),
+            "train_regime_counts": regime_train_counts,
+            "regime_models_trained": sorted(str(r) for r in regime_models),
+            "min_regime_train_rows": min_rows,
+        })
+        return preds, used
+
+    def _meta_stage(self, *, primary_model, X_train, X_test, y_train, primary_pred_test, train, test,
+                    horizon, combo_key, split):
+        """Meta-labeling second stage (Lopez de Prado AFML §3.6), inside one fold.
+
+        The meta-model is trained ONLY on the train slice: meta-labels ask whether
+        the primary side (``sign`` of its train prediction) matched the realized
+        train return, and sample weights come from |train return|. It never sees a
+        test-window label. p_meta on the test slice sizes the primary signal."""
+        from features.labeling import meta_labels, sample_weights_by_return
+
+        y_idx = y_train.index
+        primary_train_pred = np.asarray(primary_model.predict(X_train), dtype=float)
+        side_train = pd.Series(np.sign(primary_train_pred), index=y_idx)
+        ret_train = pd.Series(pd.to_numeric(y_train, errors="coerce").to_numpy(), index=y_idx)
+        meta = meta_labels(side_train, ret_train).reindex(y_idx).fillna(0).astype(int)
+        w = sample_weights_by_return(ret_train, normalize="mean").reindex(y_idx).fillna(0.0)
+
+        if meta.nunique() < 2:
+            p_meta = np.full(len(test), float(meta.mean()))
+        else:
+            mm = self._build_meta_model()
+            try:
+                mm.fit(X_train, meta.to_numpy(), sample_weight=w.to_numpy())
+            except TypeError:
+                mm.fit(X_train, meta.to_numpy())
+            proba = mm.predict_proba(X_test)
+            classes = list(getattr(mm, "classes_", [0, 1]))
+            pos = classes.index(1) if 1 in classes else proba.shape[1] - 1
+            p_meta = np.asarray(proba[:, pos], dtype=float)
+
+        tau = float(self._meta_cfg().get("threshold", 0.0))
+        gate = (p_meta >= tau).astype(float) if tau > 0 else np.ones_like(p_meta)
+        sized = np.asarray(primary_pred_test, dtype=float) * p_meta * gate
+
+        self._meta_labeling_results.setdefault(combo_key, {"folds": []})
+        self._meta_labeling_results[combo_key]["folds"].append({
+            "fold_id": int(split.fold_id),
+            "meta_train_max_date": pd.Timestamp(pd.to_datetime(train["date_ts"], utc=True).max()).isoformat(),
+            "test_start": pd.Timestamp(split.test_start).isoformat(),
+            "meta_positive_rate_train": float(meta.mean()),
+            "meta_model": str(self._meta_cfg().get("meta_model", "logistic")),
+            "threshold": tau,
+        })
+        return p_meta, sized
+
+    def _produce_fold_prediction(self, *, model_name, feature_set, train, test, X_train, X_test, y_train,
+                                 feature_cols, optuna_params, horizon, purge_days, embargo_days, label_col,
+                                 split, importances, shap_importances) -> Dict[str, Any]:
+        """Dispatch a single walk-forward fold to the requested model mode.
+
+        Every mode fits on the (already purged/embargoed) train slice only; nothing
+        from the test window influences training."""
+        combo_key = f"{model_name}|{feature_set}|{int(horizon)}"
+        extra: Dict[str, Any] = {}
+
+        if model_name == "baseline_cross_sectional_mean":
+            model = self._build_model(model_name, optuna_params)
+            model.fit(X_train, y_train, train["symbol"])
+            pred = np.asarray(model.predict(X_test, test["symbol"]), dtype=float)
+            return {"prediction": pred, "extra_columns": extra}
+
+        if model_name == "stacked_ensemble":
+            scfg = self._model_cfg.get("stacking", {}) or {}
+            base_models = list(scfg.get("base_models", ["linear_ridge", "random_forest", "lightgbm", "xgboost", "catboost"]))
+            meta_learner = scfg.get("meta_learner", "ridge")
+            pred = self._stacked_predict(
+                base_models=base_models, meta_learner=meta_learner, train=train, test=test,
+                X_train=X_train, X_test=X_test, y_train=y_train, feature_cols=feature_cols,
+                optuna_params=optuna_params, horizon=horizon, purge_days=purge_days,
+                embargo_days=embargo_days, combo_key=combo_key, split=split,
+            )
+            return {"prediction": pred, "extra_columns": extra}
+
+        regime_enabled = self._regime_conditional_enabled()
+        meta_enabled = self._meta_labeling_enabled()
+        primary_model = None
+        if regime_enabled:
+            pred, regime_used = self._regime_predict(
+                model_name=model_name, train=train, test=test, X_train=X_train, X_test=X_test,
+                y_train=y_train, optuna_params=optuna_params, combo_key=combo_key, split=split,
+            )
+            extra["regime_model"] = regime_used
+        else:
+            model = self._build_model(model_name, optuna_params)
+            model.fit(X_train, y_train)
+            pred = np.asarray(model.predict(X_test), dtype=float)
+            if hasattr(model, "feature_importances_"):
+                importances.append(np.asarray(model.feature_importances_, dtype=float))
+            shap_vec = self._compute_shap_importance(model, X_test)
+            if shap_vec is not None and shap_vec.shape[0] == len(feature_cols):
+                shap_importances.append(shap_vec)
+            primary_model = model
+
+        if meta_enabled and primary_model is not None:
+            p_meta, sized = self._meta_stage(
+                primary_model=primary_model, X_train=X_train, X_test=X_test, y_train=y_train,
+                primary_pred_test=pred, train=train, test=test, horizon=horizon,
+                combo_key=combo_key, split=split,
+            )
+            extra["meta_prob"] = p_meta
+            extra["primary_prediction"] = pred
+            pred = sized
+        elif meta_enabled and regime_enabled:
+            self._warnings.append(f"meta_labeling_skipped_with_regime_conditional:{combo_key}")
+
+        return {"prediction": pred, "extra_columns": extra}
+
     def _train_combination(self, *, panel: pd.DataFrame, label_col: str, horizon: int, feature_set: str, model_name: str, feature_cols: List[str]):
         wf = self._model_cfg.get("walk_forward", {})
         embargo_days = int(max(wf.get("embargo_days", 30), self._label_manifest.get("recommended_embargo_days", 30), horizon))
@@ -403,6 +1089,23 @@ class ModelAgent(AgentBase):
         )
         if not splits:
             raise ModelAgentError("no_valid_folds")
+
+        # Optional leakage-safe Optuna search: tunes on an inner walk-forward built
+        # only from pre-test training-window dates; None -> static config params.
+        optuna_params: Optional[Dict[str, Any]] = None
+        if self._optuna_enabled_for(model_name):
+            optuna_params = self._tune_hyperparameters_optuna(
+                panel=panel,
+                label_col=label_col,
+                horizon=horizon,
+                feature_set=feature_set,
+                model_name=model_name,
+                feature_cols=feature_cols,
+                outer_splits=splits,
+                wf=wf,
+                purge_days=purge_days,
+                embargo_days=embargo_days,
+            )
 
         prediction_frames: List[pd.DataFrame] = []
         fold_rows: List[Dict[str, Any]] = []
@@ -434,18 +1137,25 @@ class ModelAgent(AgentBase):
             medians = X_train_raw.median(numeric_only=True).replace([np.inf, -np.inf], np.nan)
             X_train = X_train_raw.fillna(medians).fillna(0.0)
             X_test = X_test_raw.fillna(medians).fillna(0.0)
-            model = self._build_model(model_name)
-            if model_name == "baseline_cross_sectional_mean":
-                model.fit(X_train, y_train, train["symbol"])
-                pred = model.predict(X_test, test["symbol"])
-            else:
-                model.fit(X_train, y_train)
-                pred = np.asarray(model.predict(X_test), dtype=float)
-                if hasattr(model, "feature_importances_"):
-                    importances.append(np.asarray(model.feature_importances_, dtype=float))
-                shap_vec = self._compute_shap_importance(model, X_test)
-                if shap_vec is not None and shap_vec.shape[0] == len(feature_cols):
-                    shap_importances.append(shap_vec)
+            fold_result = self._produce_fold_prediction(
+                model_name=model_name,
+                feature_set=feature_set,
+                train=train.reset_index(drop=True),
+                test=test.reset_index(drop=True),
+                X_train=X_train.reset_index(drop=True),
+                X_test=X_test.reset_index(drop=True),
+                y_train=y_train.reset_index(drop=True),
+                feature_cols=feature_cols,
+                optuna_params=optuna_params,
+                horizon=horizon,
+                purge_days=purge_days,
+                embargo_days=embargo_days,
+                label_col=label_col,
+                split=split,
+                importances=importances,
+                shap_importances=shap_importances,
+            )
+            pred = np.asarray(fold_result["prediction"], dtype=float)
 
             fold_pred = test[["date_ts", "symbol"]].copy()
             fold_pred["model_name"] = model_name
@@ -453,6 +1163,8 @@ class ModelAgent(AgentBase):
             fold_pred["horizon_days"] = horizon
             fold_pred["fold_id"] = split.fold_id
             fold_pred["prediction"] = pred
+            for extra_col, extra_vals in fold_result.get("extra_columns", {}).items():
+                fold_pred[extra_col] = np.asarray(extra_vals)
             fold_pred["actual_forward_return"] = y_test.to_numpy()
             fold_pred["train_start"] = split.train_start
             fold_pred["train_end"] = split.train_end_purged
@@ -645,6 +1357,23 @@ class ModelAgent(AgentBase):
             "fold_count": int(fold_metrics["fold_id"].nunique()) if not fold_metrics.empty else 0,
             "embargo_days": int(max(self._model_cfg.get("walk_forward", {}).get("embargo_days", 30), self._label_manifest.get("recommended_embargo_days", 30))),
             "purge_days": None,
+            "optuna": {
+                "enabled": bool(self._optuna_cfg().get("enabled", False)),
+                "n_trials": int(self._optuna_cfg().get("n_trials", 25)),
+                "models": list(self._optuna_cfg().get("models", ["lightgbm", "random_forest"])),
+                "objective_metric": str(self._optuna_cfg().get("objective_metric", "rank_ic_mean")),
+            },
+            "optuna_best_params": self._optuna_results,
+            "advanced_config": {
+                "loaded": bool(self._advanced_cfg_loaded),
+                "path": self._advanced_cfg_path,
+                "stacking_enabled": "stacked_ensemble" in (requested_models or []),
+                "regime_conditional_enabled": self._regime_conditional_enabled(),
+                "meta_labeling_enabled": self._meta_labeling_enabled(),
+            },
+            "stacking": self._stacking_results,
+            "meta_labeling": self._meta_labeling_results,
+            "regime_conditional": self._regime_results,
             "warnings": self._warnings,
             "limitations": [
                 "Results are conditional on the latest eligible survivor universe and may overstate historical tradability because full historical membership and delisting data are not yet modeled."
@@ -689,6 +1418,16 @@ class ModelAgent(AgentBase):
         predictions_path = pred_dir / "model_predictions.parquet"
         predictions.to_parquet(predictions_path, index=False)
         self.output_paths["model_predictions"] = str(predictions_path)
+
+        # Prediction-only export for PortfolioAgent: its leakage guard rejects
+        # any realized/label/target columns, so hand it a sanitized file.
+        forbidden_terms = ("actual", "label", "future", "realized", "target", "y_")
+        portfolio_cols = [
+            c for c in predictions.columns if not any(t in c.lower() for t in forbidden_terms)
+        ]
+        portfolio_input_path = pred_dir / "model_predictions_portfolio_input.parquet"
+        predictions[portfolio_cols].to_parquet(portfolio_input_path, index=False)
+        self.output_paths["model_predictions_portfolio_input"] = str(portfolio_input_path)
 
         fold_path = pred_dir / "fold_metrics.parquet"
         fold_metrics.to_parquet(fold_path, index=False)

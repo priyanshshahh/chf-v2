@@ -32,6 +32,7 @@ import pandas as pd
 
 from agents.base import AgentBase
 from features.feature_engineering import ALLOWED_PROHIBITED_EXACT, ensure_utc
+from features.labeling import triple_barrier_labels
 
 
 LABEL_LEAKAGE_TOKENS = (
@@ -355,6 +356,51 @@ class LabelAgent(AgentBase):
             "data_quality_md": self._build_data_quality_md(horizon_results, label_matrix, modeling_dataset),
         }
 
+    def _triple_barrier_enabled(self) -> bool:
+        return str(self._label_cfg.get("label_type", "forward_log_return")) == "triple_barrier"
+
+    def _tb_cfg(self) -> Dict[str, Any]:
+        tb = self._label_cfg.get("triple_barrier", {})
+        return tb if isinstance(tb, dict) else {}
+
+    def _vertical_barrier_days(self, horizon: int) -> int:
+        return int(self._tb_cfg().get("vertical_barrier_days", horizon))
+
+    def _compute_triple_barrier_for_symbol(self, grp_full: pd.DataFrame, horizon: int) -> Optional[pd.DataFrame]:
+        """Triple-barrier labels for one symbol, keyed by event time t0 (``date_ts``).
+
+        Leakage-safe: each event's outcome depends only on the forward price path
+        ``close[t0 : t0 + vertical_barrier]`` and on the volatility observed at t0
+        (see ``features/labeling.triple_barrier_labels``). All emitted columns are
+        ``label_``-prefixed so ModelAgent keeps them off the feature side."""
+        tbcfg = self._tb_cfg()
+        close = pd.to_numeric(grp_full["close_t"], errors="coerce")
+        close.index = pd.to_datetime(grp_full["date_ts"], utc=True)
+        close = close[~close.index.isna()].sort_index()
+        close = close[close > 0].dropna()
+        if len(close) < 3:
+            return None
+        try:
+            tb = triple_barrier_labels(
+                close,
+                close.index,
+                pt_sl=tbcfg.get("pt_sl", [1.0, 1.0]),
+                vertical_barrier_days=self._vertical_barrier_days(horizon),
+                vol_lookback=int(tbcfg.get("vol_lookback", 100)),
+            )
+        except Exception as exc:  # pragma: no cover - defensive per-symbol guard
+            self.logger.warning("triple_barrier failed for a symbol (horizon=%s): %s", horizon, exc)
+            return None
+        h = int(horizon)
+        out = pd.DataFrame({
+            "date_ts": pd.to_datetime(tb.index, utc=True),
+            f"label_tb_{h}d": tb["label"].astype("Int64").to_numpy(),
+            f"label_tb_ret_{h}d": pd.to_numeric(tb["ret"], errors="coerce").replace([np.inf, -np.inf], np.nan).to_numpy(),
+            f"label_tb_barrier_{h}d": tb["barrier_touched"].astype(str).to_numpy(),
+            f"label_tb_t1_{h}d": pd.to_datetime(tb["t1"], utc=True).to_numpy(),
+        })
+        return out
+
     def _compute_horizon_labels(self, horizon: int, drop_incomplete: bool) -> tuple[pd.DataFrame, Dict[str, Any]]:
         frames: List[pd.DataFrame] = []
         total_candidates = 0
@@ -365,11 +411,13 @@ class LabelAgent(AgentBase):
         dropped_low_cross_section_dates = 0
         missing_feature_rows = 0
         feature_keys = set(map(tuple, self._feature_df[["symbol", "date_ts"]].itertuples(index=False, name=None)))
+        tb_enabled = self._triple_barrier_enabled()
 
         for symbol, grp in self._market_df.groupby("symbol", sort=True):
             grp = grp.sort_values("date_ts").reset_index(drop=True).copy()
             total_candidates += len(grp)
             grp["close_t"] = pd.to_numeric(grp["close"], errors="coerce")
+            tb_frame = self._compute_triple_barrier_for_symbol(grp, horizon) if tb_enabled else None
             grp["close_t_plus_h"] = grp["close_t"].shift(-horizon)
             grp["future_date_ts"] = grp["date_ts"].shift(-horizon)
             grp["expected_future_date_ts"] = grp["date_ts"] + pd.Timedelta(days=horizon)
@@ -410,6 +458,8 @@ class LabelAgent(AgentBase):
                 "label_direction",
                 "is_complete",
             ]]
+            if tb_frame is not None:
+                grp = grp.merge(tb_frame, on="date_ts", how="left")
             grp["label_value"] = grp["label_fwd_logret"]
             grp["label_type"] = self._label_cfg.get("label_type", "forward_log_return")
             grp["snapshot_id"] = self.snapshot_id
@@ -495,7 +545,7 @@ class LabelAgent(AgentBase):
         horizon_cols = []
         for result in results:
             h = result.horizon
-            df = result.labels[[
+            base_cols = [
                 "date_ts",
                 "symbol",
                 "label_fwd_logret",
@@ -503,7 +553,12 @@ class LabelAgent(AgentBase):
                 "label_direction",
                 "label_rank_pct",
                 "label_quantile_bucket",
-            ]].copy()
+            ]
+            # Triple-barrier columns are already ``label_tb_*_{h}d`` (horizon-suffixed)
+            # and pass through unrenamed; they are intentionally kept OUT of the strict
+            # non-null ``horizon_cols`` check (barrier warm-up / series-end rows are NaN).
+            tb_cols = [c for c in result.labels.columns if c.startswith("label_tb_")]
+            df = result.labels[base_cols + tb_cols].copy()
             rename_map = {
                 "label_fwd_logret": f"label_fwd_logret_{h}d",
                 "label_simple_return": f"label_simple_return_{h}d",
@@ -568,6 +623,12 @@ class LabelAgent(AgentBase):
         first_label_date = label_matrix["date_ts"].min().isoformat() if not label_matrix.empty else None
         last_label_date = label_matrix["date_ts"].max().isoformat() if not label_matrix.empty else None
         horizons = [int(r.horizon) for r in results]
+        # Triple-barrier: the vertical barrier defines the label horizon, so purge/embargo
+        # must cover max(vertical_barrier_days) for generate_purged_walk_forward_splits.
+        if self._triple_barrier_enabled() and horizons:
+            tb_embargo = max(self._vertical_barrier_days(h) for h in horizons)
+        else:
+            tb_embargo = max(horizons) if horizons else 0
         output_dir = self._output_dir
         manifest = {
             "run_id": self.run_id,
@@ -602,8 +663,8 @@ class LabelAgent(AgentBase):
             "first_label_date": first_label_date,
             "last_label_date": last_label_date,
             "max_horizon_days": int(max(horizons)) if horizons else 0,
-            "recommended_embargo_days": int(self._label_cfg.get("recommended_embargo_days", max(horizons) if horizons else 0)),
-            "purge_train_test_overlap_days": int(self._label_cfg.get("purge_train_test_overlap_days", max(horizons) if horizons else 0)),
+            "recommended_embargo_days": int(self._label_cfg.get("recommended_embargo_days", tb_embargo)),
+            "purge_train_test_overlap_days": int(self._label_cfg.get("purge_train_test_overlap_days", tb_embargo)),
             "drop_incomplete_horizon_rows": bool(self._label_cfg.get("drop_incomplete_horizon_rows", True)),
             "min_assets_per_label_date": int(self._label_cfg.get("min_assets_per_label_date", 20)),
             "data_hashes": {

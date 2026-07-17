@@ -1,0 +1,589 @@
+{
+  "as_of": "2026-07-07",
+  "last_run_utc": "2026-07-07T00:15:50.680530+00:00",
+  "note": "Virtual paper trading for research validation only. Not live holdings. Not financial advice.",
+  "books": [
+    {
+      "name": "canonical_best_model",
+      "status": "skipped",
+      "skip_reason": "missing_prices_for_targets: TON",
+      "nav": null,
+      "n_fills": 0,
+      "cum_return": null,
+      "equity": [],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": null
+    },
+    {
+      "name": "ridge_30d_top5",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 99224.06163806612,
+      "n_fills": 0,
+      "cum_return": -0.007759383619338811,
+      "equity": [
+        {
+          "date": "2026-07-05",
+          "nav": 99800.8,
+          "cash": 200.8,
+          "positions_value": 99600.0,
+          "daily_return": 0.0,
+          "cum_return": -0.001991999997999927
+        },
+        {
+          "date": "2026-07-06",
+          "nav": 99685.14,
+          "cash": 200.8,
+          "positions_value": 99484.34,
+          "daily_return": -0.0011588887657377756,
+          "cum_return": -0.0031485802573186783
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 99224.06,
+          "cash": 200.8,
+          "positions_value": 99023.26,
+          "daily_return": -0.004625366700295452,
+          "cum_return": -0.007759383619338811
+        }
+      ],
+      "recent_fills": [
+        {
+          "date": "2026-07-05",
+          "symbol": "BCH",
+          "side": "buy",
+          "qty": 58.14462594207723,
+          "price": 244.71,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "BTC",
+          "side": "buy",
+          "qty": 0.22486166244110367,
+          "price": 63277.0,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "ETH",
+          "side": "buy",
+          "qty": 7.932569961523852,
+          "price": 1793.69,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "LTC",
+          "side": "buy",
+          "qty": 311.27918211082294,
+          "price": 45.71,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "SOL",
+          "side": "buy",
+          "qty": 173.68861589704244,
+          "price": 81.92,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "WBT",
+          "side": "buy",
+          "qty": 249.44900796433586,
+          "price": 57.04,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "ZEC",
+          "side": "buy",
+          "qty": 30.75051633698368,
+          "price": 462.71,
+          "notional": 14228.571414285718,
+          "cost_usd": 28.457142828571435,
+          "reason": "rebalance"
+        }
+      ],
+      "positions": {
+        "BCH": 58.14462594207723,
+        "BTC": 0.22486166244110367,
+        "ETH": 7.932569961523852,
+        "LTC": 311.27918211082294,
+        "SOL": 173.68861589704244,
+        "WBT": 249.44900796433586,
+        "ZEC": 30.75051633698368
+      },
+      "cash": 200.80010019998008,
+      "last_rebalance": "2026-07-05"
+    },
+    {
+      "name": "lightgbm_14d_top20_vs",
+      "status": "skipped",
+      "skip_reason": "missing_prices_for_targets: TON",
+      "nav": null,
+      "n_fills": 0,
+      "cum_return": null,
+      "equity": [],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": null
+    },
+    {
+      "name": "rf_14d_top20_vs",
+      "status": "skipped",
+      "skip_reason": "missing_prices_for_targets: TON",
+      "nav": null,
+      "n_fills": 0,
+      "cum_return": null,
+      "equity": [],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": null
+    },
+    {
+      "name": "benchmark_btc",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100941.9729370886,
+      "n_fills": 0,
+      "cum_return": 0.009419729370885976,
+      "equity": [
+        {
+          "date": "2026-07-05",
+          "nav": 99800.8,
+          "cash": 200.8,
+          "positions_value": 99600.0,
+          "daily_return": 0.0,
+          "cum_return": -0.001991999997999927
+        },
+        {
+          "date": "2026-07-06",
+          "nav": 100109.31,
+          "cash": 200.8,
+          "positions_value": 99908.51,
+          "daily_return": 0.0030912597982037937,
+          "cum_return": 0.0010931020106921263
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100941.97,
+          "cash": 200.8,
+          "positions_value": 100741.17,
+          "daily_return": 0.008317535445474533,
+          "cum_return": 0.009419729370885976
+        }
+      ],
+      "recent_fills": [
+        {
+          "date": "2026-07-05",
+          "symbol": "BTC",
+          "side": "buy",
+          "qty": 1.5740316370877254,
+          "price": 63277.0,
+          "notional": 99599.9999,
+          "cost_usd": 199.1999998,
+          "reason": "rebalance"
+        }
+      ],
+      "positions": {
+        "BTC": 1.5740316370877254
+      },
+      "cash": 200.80010020000918,
+      "last_rebalance": "2026-07-05"
+    },
+    {
+      "name": "benchmark_btc_eth_5050",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100490.49400661659,
+      "n_fills": 0,
+      "cum_return": 0.004904940066165819,
+      "equity": [
+        {
+          "date": "2026-07-05",
+          "nav": 99800.8,
+          "cash": 200.8,
+          "positions_value": 99600.0,
+          "daily_return": 0.0,
+          "cum_return": -0.001991999997999927
+        },
+        {
+          "date": "2026-07-06",
+          "nav": 99657.7,
+          "cash": 200.8,
+          "positions_value": 99456.9,
+          "daily_return": -0.0014338290331624703,
+          "cum_return": -0.0034229728437312756
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100490.49,
+          "cash": 200.8,
+          "positions_value": 100289.69,
+          "daily_return": 0.008356517040795985,
+          "cum_return": 0.004904940066165819
+        }
+      ],
+      "recent_fills": [
+        {
+          "date": "2026-07-05",
+          "symbol": "BTC",
+          "side": "buy",
+          "qty": 0.7870158185438627,
+          "price": 63277.0,
+          "notional": 49799.99995,
+          "cost_usd": 99.5999999,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-05",
+          "symbol": "ETH",
+          "side": "buy",
+          "qty": 27.763994865333473,
+          "price": 1793.69,
+          "notional": 49799.99995,
+          "cost_usd": 99.5999999,
+          "reason": "rebalance"
+        }
+      ],
+      "positions": {
+        "BTC": 0.7870158185438627,
+        "ETH": 27.763994865333473
+      },
+      "cash": 200.80010020000918,
+      "last_rebalance": "2026-07-05"
+    },
+    {
+      "name": "sleeve_trend",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 99390.87671191707,
+      "n_fills": 0,
+      "cum_return": -0.006091232880829356,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 99880.0,
+          "cash": 39880.0,
+          "positions_value": 60000.0,
+          "daily_return": 0.0,
+          "cum_return": -0.0011999999999998678
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 99390.88,
+          "cash": 39880.0,
+          "positions_value": 59510.88,
+          "daily_return": -0.004897109412124068,
+          "cum_return": -0.006091232880829356
+        }
+      ],
+      "recent_fills": [
+        {
+          "date": "2026-07-06",
+          "symbol": "ADA",
+          "side": "buy",
+          "qty": 49916.166997719614,
+          "price": 0.188996,
+          "notional": 9433.955897901016,
+          "cost_usd": 18.867911795802033,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "ETH",
+          "side": "buy",
+          "qty": 7.392183429220875,
+          "price": 1782.98,
+          "notional": 13180.115210632235,
+          "cost_usd": 26.36023042126447,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "HYPE",
+          "side": "buy",
+          "qty": 111.96753597597039,
+          "price": 71.73,
+          "notional": 8031.431355556357,
+          "cost_usd": 16.062862711112714,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "SOL",
+          "side": "buy",
+          "qty": 153.8528593745836,
+          "price": 81.46,
+          "notional": 12532.85392465358,
+          "cost_usd": 25.06570784930716,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "XLM",
+          "side": "buy",
+          "qty": 52743.12936199826,
+          "price": 0.201921,
+          "notional": 10649.94542390405,
+          "cost_usd": 21.2998908478081,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "ZEC",
+          "side": "buy",
+          "qty": 13.328650197289134,
+          "price": 463.04,
+          "notional": 6171.698187352761,
+          "cost_usd": 12.343396374705522,
+          "reason": "rebalance"
+        }
+      ],
+      "positions": {
+        "ADA": 49916.166997719614,
+        "ETH": 7.392183429220875,
+        "HYPE": 111.96753597597039,
+        "SOL": 153.8528593745836,
+        "XLM": 52743.12936199826,
+        "ZEC": 13.328650197289134
+      },
+      "cash": 39880.000000000015,
+      "last_rebalance": "2026-07-06"
+    },
+    {
+      "name": "sleeve_xsmom",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100000.0,
+      "n_fills": 0,
+      "cum_return": 0.0,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        }
+      ],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": "2026-07-06"
+    },
+    {
+      "name": "sleeve_carry",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100000.0,
+      "n_fills": 0,
+      "cum_return": 0.0,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        }
+      ],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": "2026-07-06"
+    },
+    {
+      "name": "sleeve_technical",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100000.0,
+      "n_fills": 0,
+      "cum_return": 0.0,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        }
+      ],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": "2026-07-06"
+    },
+    {
+      "name": "sleeve_carry_neutral",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100000.0,
+      "n_fills": 0,
+      "cum_return": 0.0,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        }
+      ],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": "2026-07-06"
+    },
+    {
+      "name": "sleeve_statarb",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 100000.0,
+      "n_fills": 0,
+      "cum_return": 0.0,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 100000.0,
+          "cash": 100000.0,
+          "positions_value": 0.0,
+          "daily_return": 0.0,
+          "cum_return": 0.0
+        }
+      ],
+      "recent_fills": [],
+      "positions": {},
+      "cash": 100000.0,
+      "last_rebalance": "2026-07-06"
+    },
+    {
+      "name": "sleeve_defi_yield",
+      "status": "ok",
+      "skip_reason": null,
+      "nav": 99995.22514378032,
+      "n_fills": 0,
+      "cum_return": -4.7748562196803235e-05,
+      "equity": [
+        {
+          "date": "2026-07-06",
+          "nav": 99820.0,
+          "cash": 9820.0,
+          "positions_value": 90000.0,
+          "daily_return": 0.0,
+          "cum_return": -0.0018000000000000238
+        },
+        {
+          "date": "2026-07-07",
+          "nav": 99995.23,
+          "cash": 9820.0,
+          "positions_value": 90175.23,
+          "daily_return": 0.0017554111779234383,
+          "cum_return": -4.7748562196803235e-05
+        }
+      ],
+      "recent_fills": [
+        {
+          "date": "2026-07-06",
+          "symbol": "SOL",
+          "side": "buy",
+          "qty": 422.24885432286936,
+          "price": 81.46,
+          "notional": 34396.39167314093,
+          "cost_usd": 68.79278334628187,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "USDC",
+          "side": "buy",
+          "qty": 39383.00668682976,
+          "price": 0.999798,
+          "notional": 39375.05131947902,
+          "cost_usd": 78.75010263895804,
+          "reason": "rebalance"
+        },
+        {
+          "date": "2026-07-06",
+          "symbol": "USDT",
+          "side": "buy",
+          "qty": 16243.14335010845,
+          "price": 0.999102,
+          "notional": 16228.557007380054,
+          "cost_usd": 32.45711401476011,
+          "reason": "rebalance"
+        }
+      ],
+      "positions": {
+        "SOL": 422.24885432286936,
+        "USDC": 39383.00668682976,
+        "USDT": 16243.14335010845
+      },
+      "cash": 9820.0,
+      "last_rebalance": "2026-07-06"
+    }
+  ]
+}

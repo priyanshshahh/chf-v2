@@ -1,0 +1,18 @@
+# CHF fund-accounting configuration (accounting/ package only).
+# Papertrade engine parameters stay in configs/run_config.yaml — do not merge.
+
+accounting:
+  # Management fee: annual rate, accrued daily as NAV * rate / day_count.
+  management_fee_annual: 0.02
+  day_count: 365
+
+  # Performance fee: crystallized monthly, only on gains above the
+  # per-book high-water mark (state in data/accounting/hwm.json).
+  performance_fee_rate: 0.20
+  crystallization: monthly
+
+  # Dual-book reconciliation tolerance (engine NAV vs shadow NAV).
+  tolerance_bps: 1.0
+
+  # Per-book high-water-mark state file.
+  hwm_path: data/accounting/hwm.json

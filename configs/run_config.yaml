@@ -1017,6 +1017,9 @@ modeling:
   horizons: [7, 14, 30]
   model_names:
     - baseline_cross_sectional_mean
+    - linear_ridge
+    - random_forest
+    - lightgbm
   feature_sets:
     - market_only
     - market_plus_onchain
@@ -1059,6 +1062,17 @@ modeling:
     objective: "regression"
     n_jobs: -1
     verbose: -1
+  # Optional leakage-safe Optuna hyperparameter search (NEXT_STEPS item [3]).
+  # When enabled, ModelAgent runs a seeded TPE study per (model, feature_set, horizon)
+  # on an inner purged+embargoed walk-forward built ONLY from the earliest outer
+  # fold's training window (test-window rows are never touched). Best params
+  # override the static blocks above and are logged in model_manifest.json under
+  # "optuna_best_params".
+  optuna:
+    enabled: false        # default OFF; canonical run stays reproducible
+    n_trials: 25
+    models: [lightgbm, random_forest]
+    objective_metric: rank_ic_mean
 
 modeling_smoke:
   research_mode: true
@@ -1088,7 +1102,7 @@ modeling_smoke:
 
 portfolio:
   research_mode: true
-  prediction_path: "data/predictions/model_predictions.parquet"
+  prediction_path: "data/predictions/model_predictions_portfolio_input.parquet"
   leaderboard_path: "data/predictions/model_leaderboard.parquet"
   market_path: "data/raw/market/market_ohlcv.parquet"
   output_dir: "data/allocations"
@@ -1124,7 +1138,7 @@ portfolio:
 
 portfolio_smoke:
   research_mode: true
-  prediction_path: "data/predictions/model_predictions.parquet"
+  prediction_path: "data/predictions/model_predictions_portfolio_input.parquet"
   leaderboard_path: "data/predictions/model_leaderboard.parquet"
   market_path: "data/raw/market/market_ohlcv.parquet"
   output_dir: "data/allocations_smoke"
@@ -1383,7 +1397,7 @@ alpha_research:
   output_dir: "data/research"
   feature_path: "data/features/full_features.parquet"
   label_path: "data/labels/label_matrix.parquet"
-  max_experiments: 80
+  max_experiments: 240
   feature_sets:
     - market_only
     - market_plus_onchain
@@ -1395,7 +1409,12 @@ alpha_research:
     - excess_vs_equal_weight
     - excess_vs_btc
     - volatility_adjusted_forward_return
+    # NEXT_STEPS [9]: forward return / trailing 30d realized vol (leakage-safe
+    # past-only denominator from the realized_vol_30d feature; div-by-zero -> NaN).
+    - vol_adjusted_forward_return
     - cross_sectional_forward_rank
+    # NEXT_STEPS [9]: per-date cross-sectional percentile rank of the raw forward return.
+    - cross_sectional_rank
     - top_quantile_classification
   horizons: [7, 14, 30]
   models:
@@ -1434,6 +1453,23 @@ alpha_research:
     - score_weighted_vol_scaled
     - turnover_controlled
   transaction_cost_bps: [0, 10, 20, 50, 100]
+  # NEXT_STEPS [9]: optional per-regime rank-IC annotation. Does NOT multiply the
+  # experiment grid; existing experiments gain rank_ic_<name>/rank_ic_tstat_<name>/
+  # n_dates_<name> leaderboard columns computed on the regime-subset dates.
+  # Rules over BTC context (read lazily from regime_market_data_path at run time):
+  #   bull (BTC 90d return > 0), bear (BTC 90d return <= 0),
+  #   high_vol / low_vol (BTC 30d realized vol above/at-or-below its expanding median).
+  # If BTC covers < regime_min_btc_coverage of panel dates (e.g. mid-repair market
+  # file), regime columns are skipped with a logged warning and the run continues.
+  # Example:
+  # regime_filters:
+  #   - {name: bull, rule: bull}
+  #   - {name: bear, rule: bear}
+  #   - {name: high_vol, rule: high_vol}
+  #   - {name: low_vol, rule: low_vol}
+  regime_filters: []
+  regime_market_data_path: "data/raw/market/market_ohlcv.parquet"
+  regime_min_btc_coverage: 0.80
   fail_on_empty_results: true
 
 alpha_research_smoke:
@@ -1502,3 +1538,79 @@ dashboard:
   port: 8501
   theme: "dark"
   title: "CHF — Crypto Hedge Fund Dashboard"
+
+papertrade:
+  output_dir: "data/papertrade"
+  broker: "simulator"          # simulator | alpaca (paper only; real trading is not supported)
+  derivatives_path: "data/external/derivatives_okx.parquet"   # perp funding for accrual
+  books:
+    - name: "canonical_best_model"
+      weights_path: "data/allocations/allocations_top_5_equal_weight.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "ridge_30d_top5"
+      weights_path: "data/allocations_candidate_linear_ridge_30d/allocations_top_5_equal_weight.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "lightgbm_14d_top20_vs"
+      weights_path: "data/allocations_candidate_lightgbm_14d/allocations_top_20_vol_scaled.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "rf_14d_top20_vs"
+      weights_path: "data/allocations_candidate_random_forest_14d/allocations_top_20_vol_scaled.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "benchmark_btc"
+      static_weights: {"BTC": 1.0}
+      rebalance: "on_change"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "benchmark_btc_eth_5050"
+      static_weights: {"BTC": 0.5, "ETH": 0.5}
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "sleeve_trend"
+      weights_path: "data/strategies/sleeve_trend_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "sleeve_xsmom"
+      weights_path: "data/strategies/sleeve_xsmom_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "sleeve_carry"
+      weights_path: "data/strategies/sleeve_carry_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    - name: "sleeve_technical"
+      weights_path: "data/strategies/sleeve_technical_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+    # --- market-neutral / short-capable sleeves (opt-in shorting) ---
+    - name: "sleeve_carry_neutral"
+      weights_path: "data/strategies/sleeve_carry_neutral_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+      allow_short: true
+      margin_requirement: 0.5      # gross short notional * 0.5 must be <= equity
+    - name: "sleeve_statarb"
+      weights_path: "data/strategies/sleeve_statarb_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000
+      allow_short: true
+      margin_requirement: 0.5
+    - name: "sleeve_defi_yield"
+      weights_path: "data/strategies/sleeve_defi_yield_weights.parquet"
+      rebalance: "weekly"
+      cost_bps: 20
+      starting_cash: 100000

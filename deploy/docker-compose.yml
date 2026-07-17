@@ -1,0 +1,51 @@
+# Project CHF continuous scheduler stack.
+#
+# Usage:
+#   cp .env.example .env      # then fill in SMTP_* / WEBHOOK_URL / API keys
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   docker compose -f deploy/docker-compose.yml logs -f scheduler
+#
+# The build context is the repo root (..), so the Dockerfile can COPY the code.
+services:
+  scheduler:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: chf-scheduler:latest
+    container_name: chf-scheduler
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      TZ: "UTC"
+    volumes:
+      # Persist pipeline outputs and scheduler logs on the host.
+      - ../data:/app/data
+      - ../logs:/app/logs
+    # Keep container logs bounded so a long-running fund does not fill the disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Optional Postgres, for teams that want to mirror reports/metrics into a DB.
+  # CHF runs entirely on parquet/JSON by default; uncomment to enable and point
+  # your own exporter at it. Credentials belong in .env, never in this file.
+  # ---------------------------------------------------------------------------
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: chf-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: "${POSTGRES_USER:-chf}"
+  #     POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+  #     POSTGRES_DB: "${POSTGRES_DB:-chf}"
+  #   volumes:
+  #     - chf_pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   chf_pgdata:

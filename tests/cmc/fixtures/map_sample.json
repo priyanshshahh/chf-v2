@@ -1,0 +1,25 @@
+{
+  "status": {"error_code": 0},
+  "data": [
+    {
+      "id": 1,
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "slug": "bitcoin",
+      "is_active": 1,
+      "first_historical_data": "2010-07-13T00:05:00.000Z",
+      "last_historical_data": "2026-06-30T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "id": 4172,
+      "name": "Terra Classic",
+      "symbol": "LUNC",
+      "slug": "terra-luna",
+      "is_active": 0,
+      "first_historical_data": "2019-07-26T00:00:00.000Z",
+      "last_historical_data": "2022-05-13T00:00:00.000Z",
+      "status": "inactive"
+    }
+  ]
+}

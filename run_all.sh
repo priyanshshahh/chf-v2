@@ -46,7 +46,6 @@ python3 scripts/verify_market_run.py
 echo ""
 
 echo "[3/8] Running OnChainAgent..."
-python3 scripts/verify_market_run.py
 python3 main.py onchain
 python3 scripts/verify_onchain_run.py
 echo ""
@@ -57,7 +56,6 @@ python3 scripts/verify_feature_run.py
 echo ""
 
 echo "[5/8] Running LabelAgent..."
-python3 scripts/verify_feature_run.py
 python3 main.py labels
 python3 scripts/verify_label_run.py
 echo ""

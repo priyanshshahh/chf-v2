@@ -243,6 +243,7 @@ class CCXTMarketProvider:
         all_rows: List[List[float]] = []
         pages = 0
         last_ts: Optional[int] = None
+        effective_page_cap: Optional[int] = None
         while pages < max_pages and len(all_rows) < max_rows:
             payload: List[List[float]] = []
             for attempt in range(1, self.max_retries + 1):
@@ -286,7 +287,16 @@ class CCXTMarketProvider:
                 if not payload:
                     break
             all_rows.extend(payload)
-            if len(payload) < limit:
+            # A short page only means "end of data" if it's shorter than the
+            # exchange's real page cap. Coinbase caps pages at 300 and Kraken
+            # at 720 regardless of the requested limit, so breaking on
+            # len(payload) < limit truncated history to a single page (and the
+            # truncated result then got cached as if complete). Treat the
+            # largest page seen so far as the effective cap and only stop when
+            # a page comes back short of it.
+            if effective_page_cap is None or len(payload) > effective_page_cap:
+                effective_page_cap = len(payload)
+            if len(payload) < effective_page_cap:
                 break
             next_since = int(payload[-1][0]) + 1
             if last_ts is not None and next_since <= last_ts:

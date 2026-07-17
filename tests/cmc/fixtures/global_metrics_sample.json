@@ -1,0 +1,49 @@
+{
+  "status": {"error_code": 0, "error_message": null},
+  "data": {
+    "quotes": [
+      {
+        "timestamp": "2024-01-01T00:00:00.000Z",
+        "btc_dominance": 52.1,
+        "eth_dominance": 17.3,
+        "active_cryptocurrencies": 8800,
+        "quote": {
+          "USD": {
+            "total_market_cap": 1700000000000.0,
+            "total_volume_24h": 64000000000.0,
+            "altcoin_market_cap": 810000000000.0,
+            "timestamp": "2024-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "timestamp": "2024-01-02T00:00:00.000Z",
+        "btc_dominance": 52.4,
+        "eth_dominance": 17.1,
+        "active_cryptocurrencies": 8805,
+        "quote": {
+          "USD": {
+            "total_market_cap": 1712000000000.0,
+            "total_volume_24h": 66500000000.0,
+            "altcoin_market_cap": 815000000000.0,
+            "timestamp": "2024-01-02T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "timestamp": "2024-01-03T00:00:00.000Z",
+        "btc_dominance": 51.9,
+        "eth_dominance": 17.5,
+        "active_cryptocurrencies": 8811,
+        "quote": {
+          "USD": {
+            "total_market_cap": 1695000000000.0,
+            "total_volume_24h": 71200000000.0,
+            "altcoin_market_cap": 806000000000.0,
+            "timestamp": "2024-01-03T00:00:00.000Z"
+          }
+        }
+      }
+    ]
+  }
+}

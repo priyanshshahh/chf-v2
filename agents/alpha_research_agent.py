@@ -13,6 +13,7 @@ from sklearn.exceptions import ConvergenceWarning
 from scipy.stats import pearsonr, spearmanr
 
 from agents.base import AgentBase
+from features.feature_source_map import FEATURE_SOURCE_MAP_FILENAME, load_feature_source_map
 from models.walk_forward import generate_purged_walk_forward_splits
 
 
@@ -134,8 +135,12 @@ class AlphaResearchAgent(AgentBase):
         self._labels = pd.DataFrame()
         self._panel = pd.DataFrame()
         self._feature_sets: Dict[str, List[str]] = {}
+        self._feature_source_map: Dict[str, str] = {}
         self._warnings: List[str] = []
         self._skipped: List[Dict[str, Any]] = []
+        # regime name -> set of panel dates belonging to that regime (empty = no
+        # regime annotation; populated lazily in run() from alpha_research.regime_filters)
+        self._regime_masks: Dict[str, set] = {}
 
     def _content_hash(self, df: Optional[pd.DataFrame]) -> str:
         """Deterministic 16-hex fingerprint of the merged research panel (features + label
@@ -215,6 +220,13 @@ class AlphaResearchAgent(AgentBase):
             raise FileNotFoundError(f"Missing alpha research label input: {label_path}")
         self._features = pd.read_parquet(feature_path)
         self._labels = pd.read_parquet(label_path)
+        # Explicit per-column source tags (FeatureAgent / backfill script); legacy
+        # ONCHAIN_HINTS substring matching is only a fallback for unmapped columns.
+        source_map_path = _resolve(
+            self._project_root,
+            cfg.get("feature_source_map_path", str(Path(feature_path).parent / FEATURE_SOURCE_MAP_FILENAME)),
+        )
+        self._feature_source_map = load_feature_source_map(source_map_path) or {}
         for df in [self._features, self._labels]:
             df["date_ts"] = pd.to_datetime(df["date_ts"], utc=True, errors="coerce").dt.normalize()
         self._labels = self._enrich_label_matrix(self._labels)
@@ -230,6 +242,9 @@ class AlphaResearchAgent(AgentBase):
     def run(self) -> Dict[str, Any]:
         self.generate_snapshot_id("alpha_research")
         cfg = self._cfg
+        # Regime context is computed lazily at run time (the market file may be
+        # mid-repair); on any failure this degrades to {} and regime columns are skipped.
+        self._regime_masks = self._prepare_regime_masks()
         experiments = self._experiment_grid()
         predictions: List[pd.DataFrame] = []
         fold_rows: List[Dict[str, Any]] = []
@@ -291,9 +306,27 @@ class AlphaResearchAgent(AgentBase):
             "report_md": self._build_report(leaderboard, best_experiments),
         }
 
+    def _trailing_vol_lookup(self) -> Optional[pd.DataFrame]:
+        """Trailing 30d realized volatility per (date_ts, symbol) for the
+        vol_adjusted_forward_return label target. Uses the leakage-safe trailing
+        feature column (default realized_vol_30d); degrades gracefully to None
+        (all-NaN vol-adjusted labels) when the feature is unavailable."""
+        col = str(self._cfg.get("trailing_vol_feature", "realized_vol_30d"))
+        if col not in self._features.columns:
+            msg = f"trailing vol feature '{col}' unavailable; vol_adjusted_forward_return labels will be NaN"
+            self._warnings.append(msg)
+            self.logger.warning(msg)
+            return None
+        vol = self._features[["date_ts", "symbol", col]].copy()
+        vol[col] = pd.to_numeric(vol[col], errors="coerce")
+        return vol.drop_duplicates(["date_ts", "symbol"], keep="last").rename(columns={col: "_trailing_vol_30d"})
+
     def _enrich_label_matrix(self, labels: pd.DataFrame) -> pd.DataFrame:
         labels = labels.copy()
         horizons = [7, 14, 30]
+        trailing_vol = self._trailing_vol_lookup()
+        if trailing_vol is not None:
+            labels = labels.merge(trailing_vol, on=["date_ts", "symbol"], how="left")
         for h in horizons:
             raw = f"label_fwd_logret_{h}d"
             if raw not in labels.columns:
@@ -309,11 +342,23 @@ class AlphaResearchAgent(AgentBase):
             labels[f"cross_sectional_forward_rank_{h}d"] = labels.groupby("date_ts")[raw].rank(method="average", pct=True)
             q80 = labels.groupby("date_ts")[raw].transform(lambda s: s.quantile(0.80))
             labels[f"top_quantile_classification_{h}d"] = (labels[raw] >= q80).astype(int)
+            # NEXT_STEPS [9]: forward return scaled by *trailing* 30d realized vol
+            # (leakage-safe past-only denominator, unlike volatility_adjusted_forward_return
+            # above which scales by a rolling std of the forward-return label itself).
+            if "_trailing_vol_30d" in labels.columns:
+                den = labels["_trailing_vol_30d"].replace(0, np.nan)  # div-by-zero guard
+                labels[f"vol_adjusted_forward_return_{h}d"] = (labels[raw] / den).replace([np.inf, -np.inf], np.nan)
+            else:
+                labels[f"vol_adjusted_forward_return_{h}d"] = np.nan
+            # NEXT_STEPS [9]: per-date cross-sectional percentile rank of the forward return.
+            labels[f"cross_sectional_rank_{h}d"] = labels.groupby("date_ts")[raw].rank(method="average", pct=True)
             labels = labels.drop(columns=["_btc_forward"])
+        if "_trailing_vol_30d" in labels.columns:
+            labels = labels.drop(columns=["_trailing_vol_30d"])
         return labels
 
     def _write_enriched_labels(self) -> None:
-        variants = sorted(c for c in self._labels.columns if c.startswith(("raw_forward_return_", "excess_vs_", "volatility_adjusted_", "cross_sectional_", "top_quantile_")))
+        variants = sorted(c for c in self._labels.columns if c.startswith(("raw_forward_return_", "excess_vs_", "volatility_adjusted_", "vol_adjusted_", "cross_sectional_", "top_quantile_")))
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._labels[["date_ts", "symbol", *variants]].to_parquet(self._output_dir / "label_variants.parquet", index=False)
         coverage_rows = []
@@ -352,7 +397,14 @@ class AlphaResearchAgent(AgentBase):
             low = col.lower()
             return any(w in low for w in words)
 
-        onchain = [c for c in candidates if has_any(c, ONCHAIN_HINTS)]
+        def is_onchain(col: str) -> bool:
+            # Explicit source tag wins; substring hints only cover unmapped columns.
+            tagged = self._feature_source_map.get(col)
+            if tagged is not None:
+                return tagged == "onchain"
+            return has_any(col, ONCHAIN_HINTS)
+
+        onchain = [c for c in candidates if is_onchain(c)]
         market = [c for c in candidates if c not in onchain]
         liquidity_momentum = [c for c in candidates if has_any(c, ["momentum", "volume", "dollar_volume", "log_ret_14", "log_ret_30"])]
         valuation = [c for c in candidates if has_any(c, ["mvrv", "nvt", "tvl", "fees", "market_cap_to", "valuation"])]
@@ -382,6 +434,85 @@ class AlphaResearchAgent(AgentBase):
             )
         out = self._output_dir / "feature_sets.json"
         out.write_text(json.dumps(rows, indent=2, default=str))
+
+    def _regime_warn(self, msg: str) -> None:
+        self._warnings.append(msg)
+        self.logger.warning(msg)
+
+    def _prepare_regime_masks(self) -> Dict[str, set]:
+        """NEXT_STEPS [9]: optional per-regime annotation of experiments.
+
+        Config ``alpha_research.regime_filters`` is a list of {name, rule} entries
+        (default [] = disabled, behavior identical to before). Supported rules over
+        BTC context read lazily from the market OHLCV file:
+          - bull:     BTC 90d return > 0
+          - bear:     BTC 90d return <= 0
+          - high_vol: BTC 30d realized vol above its expanding median
+          - low_vol:  BTC 30d realized vol at/below its expanding median
+        Returns {} (regime columns skipped, run continues) when no filters are
+        configured, BTC coverage is < regime_min_btc_coverage of panel dates
+        (e.g. a mid-repair market file), or any error occurs.
+        """
+        filters = self._cfg.get("regime_filters", []) or []
+        if not filters:
+            return {}
+        try:
+            market_path = _resolve(
+                self._project_root,
+                self._cfg.get("regime_market_data_path", "data/raw/market/market_ohlcv.parquet"),
+            )
+            if not market_path.exists():
+                self._regime_warn(f"regime filters skipped: missing market file {market_path}")
+                return {}
+            panel_dates = pd.DatetimeIndex(self._panel["date_ts"].unique()).sort_values()
+            market = pd.read_parquet(market_path, columns=["date_ts", "symbol", "close"])
+            btc = market[market["symbol"].astype(str) == "BTC"].copy()
+            btc["date_ts"] = pd.to_datetime(btc["date_ts"], utc=True, errors="coerce").dt.normalize()
+            btc["close"] = pd.to_numeric(btc["close"], errors="coerce")
+            btc = btc.dropna(subset=["date_ts", "close"])
+            btc = btc[btc["close"] > 0].drop_duplicates("date_ts", keep="last").sort_values("date_ts")
+            if btc.empty:
+                self._regime_warn("regime filters skipped: no valid BTC rows in market file")
+                return {}
+            coverage = float(btc["date_ts"].isin(panel_dates).sum()) / max(len(panel_dates), 1)
+            min_cov = float(self._cfg.get("regime_min_btc_coverage", 0.80))
+            if coverage < min_cov:
+                self._regime_warn(
+                    f"regime filters skipped: BTC covers {coverage:.1%} of panel dates "
+                    f"(< {min_cov:.0%}); market file may be mid-repair"
+                )
+                return {}
+            # Calendar-daily index so shift(N) means exactly N calendar days; missing
+            # closes stay NaN and those dates fall out of every regime.
+            close = btc.set_index("date_ts")["close"].reindex(
+                pd.date_range(btc["date_ts"].min(), btc["date_ts"].max(), freq="D", tz="UTC")
+            )
+            ret_90d = close / close.shift(90) - 1.0
+            logret_1d = np.log(close / close.shift(1))
+            vol_30d = logret_1d.rolling(30, min_periods=10).std()
+            vol_median = vol_30d.expanding(min_periods=30).median()
+            rules = {
+                "bull": ret_90d.notna() & (ret_90d > 0),
+                "bear": ret_90d.notna() & (ret_90d <= 0),
+                "high_vol": vol_30d.notna() & vol_median.notna() & (vol_30d > vol_median),
+                "low_vol": vol_30d.notna() & vol_median.notna() & (vol_30d <= vol_median),
+            }
+            masks: Dict[str, set] = {}
+            for f in filters:
+                if isinstance(f, str):
+                    name, rule = f, f
+                else:
+                    name = str(f.get("name") or f.get("rule") or "")
+                    rule = str(f.get("rule") or name)
+                if not name or rule not in rules:
+                    self._regime_warn(f"regime filter '{name}' skipped: unknown rule '{rule}'")
+                    continue
+                mask = rules[rule]
+                masks[name] = set(pd.DatetimeIndex(mask.index[mask]).intersection(panel_dates))
+            return masks
+        except Exception as exc:
+            self._regime_warn(f"regime filters skipped: {exc}")
+            return {}
 
     def _experiment_grid(self) -> List[Dict[str, Any]]:
         cfg = self._cfg
@@ -673,7 +804,7 @@ class AlphaResearchAgent(AgentBase):
         candidate = signal_gate_passed
         if exp["model_name"] == "baseline_cross_sectional_mean" and not self._cfg.get("allow_baseline_candidate", False):
             candidate = False
-        return {
+        row = {
             **exp,
             "mean_rank_ic": mean_ic,
             "median_rank_ic": float(ic.median()) if len(ic) else np.nan,
@@ -705,6 +836,20 @@ class AlphaResearchAgent(AgentBase):
             "beats_btc_eth_50_50": False,
             "beats_equal_weight": False,
         }
+        # NEXT_STEPS [9]: annotate (not multiply) experiments with per-regime rank-IC
+        # stats computed on the regime-subset dates.
+        for name, dates in (self._regime_masks or {}).items():
+            sub_ic = pd.to_numeric(m.loc[m["date_ts"].isin(dates), "rank_ic"], errors="coerce").dropna()
+            r_mean = float(sub_ic.mean()) if len(sub_ic) else np.nan
+            r_std = float(sub_ic.std(ddof=1)) if len(sub_ic) > 1 else np.nan
+            row[f"rank_ic_{name}"] = r_mean
+            row[f"rank_ic_tstat_{name}"] = (
+                float(r_mean / (r_std / np.sqrt(len(sub_ic))))
+                if len(sub_ic) > 1 and np.isfinite(r_std) and r_std > 0
+                else np.nan
+            )
+            row[f"n_dates_{name}"] = int(len(sub_ic))
+        return row
 
     def _finalize_leaderboard(self, lb: pd.DataFrame) -> pd.DataFrame:
         if lb.empty:
@@ -745,6 +890,20 @@ class AlphaResearchAgent(AgentBase):
         rows = []
         for exp, grp in pred.groupby("experiment_id"):
             rows.append({"experiment_id": exp, "regime": "all", "mean_actual_return_top_decile": grp.sort_values("prediction", ascending=False).head(max(int(len(grp) * 0.1), 1))["actual_forward_return"].mean(), "rows": len(grp)})
+            for name, dates in (self._regime_masks or {}).items():
+                sub = grp[grp["date_ts"].isin(dates)]
+                if sub.empty:
+                    continue
+                ic, _ = _safe_corr(sub["prediction"], sub["actual_forward_return"], "spearman")
+                rows.append(
+                    {
+                        "experiment_id": exp,
+                        "regime": name,
+                        "rank_ic": ic,
+                        "mean_actual_return_top_decile": sub.sort_values("prediction", ascending=False).head(max(int(len(sub) * 0.1), 1))["actual_forward_return"].mean(),
+                        "rows": len(sub),
+                    }
+                )
         return pd.DataFrame(rows)
 
     def _build_subperiod_report(self, pred: pd.DataFrame) -> pd.DataFrame:
@@ -778,6 +937,11 @@ class AlphaResearchAgent(AgentBase):
             "canonical_outputs_mutated": False,
             "export_candidate_to_predictions": bool(self._cfg.get("export_candidate_to_predictions", False)),
             "signal_only": bool(self._cfg.get("signal_only", True)),
+            "regime_filters_configured": [
+                (f if isinstance(f, str) else str(f.get("name") or f.get("rule") or ""))
+                for f in (self._cfg.get("regime_filters", []) or [])
+            ],
+            "regime_filters_applied": sorted(self._regime_masks or {}),
         }
 
     def _build_report(self, lb: pd.DataFrame, best: pd.DataFrame) -> str:

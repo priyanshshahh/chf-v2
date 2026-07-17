@@ -700,3 +700,269 @@ class DeFiLlamaProvider:
                 }
             )
         return pd.DataFrame(observations)
+
+
+# ============================================================================
+# Standalone keyless data-breadth collector (CLI).
+#
+# Independent of the point-in-time ``DeFiLlamaProvider`` class above (which is
+# consumed by agents/onchain_agent.py). This section adds a plain, batch-style
+# collector — matching the house style of providers/funding_rates.py — that
+# writes tidy long-format parquets under data/external/defillama/ for a future
+# DeFi-yield sleeve and fundamental valuation:
+#
+#   tvl.parquet          protocol TVL time series  {protocol, date, tvl_usd, source}
+#   yields.parquet       pool APY snapshot         {pool_id, project, symbol,
+#                                                    chain, apy, tvl_usd, ts_utc, source}
+#   chains.parquet       chain TVL time series     {chain, date, tvl_usd, source}
+#   stablecoins.parquet  stablecoin circulating    {stablecoin, symbol,
+#                                                    circulating_usd, ts_utc, source}
+#
+# DeFiLlama is fully keyless (api.llama.fi / yields.llama.fi / stablecoins.llama.fi).
+# Idempotent upsert via src.cmc.storage.upsert. Per-endpoint failures log & skip.
+#
+# Runnable as:  .venv/bin/python -m providers.defillama
+# ============================================================================
+
+import argparse as _argparse
+import time as _time
+
+import requests as _requests
+import yaml as _yaml
+
+from configs.logging_config import get_logger as _get_logger
+from src.cmc.storage import upsert as _upsert
+
+_logger = _get_logger("providers.defillama.collector")
+
+_CONFIG_PATH = "configs/data_sources.yaml"
+_DEFAULT_BASE_URL = "https://api.llama.fi"
+_DEFAULT_YIELDS_URL = "https://yields.llama.fi"
+_DEFAULT_STABLE_URL = "https://stablecoins.llama.fi"
+_DEFAULT_OUTPUT_DIR = "data/external/defillama"
+_REQUEST_TIMEOUT = 30
+_SLEEP = 1.0
+_DEFAULT_PROTOCOLS = ["uniswap", "aave", "lido", "makerdao", "curve-dex"]
+_DEFAULT_CHAINS = ["Ethereum", "Solana", "Bitcoin", "BSC", "Arbitrum"]
+_DEFAULT_YIELDS_TOP_N = 200
+_DEFAULT_STABLE_TOP_N = 50
+
+
+def load_collector_config(config_path: "str | Path" = _CONFIG_PATH) -> Dict[str, Any]:
+    """Load the ``defillama`` section of data_sources.yaml (best effort)."""
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return (_yaml.safe_load(f) or {}).get("defillama", {}) or {}
+
+
+def _get_json(session: "_requests.Session", url: str, params: Optional[dict] = None) -> Any:
+    """Single network chokepoint for the collector; tests monkeypatch this."""
+    resp = session.get(url, params=params or {}, timeout=_REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _to_daily_utc(value: Any) -> Optional[pd.Timestamp]:
+    """Coerce an epoch-seconds or date-like value to a UTC-normalized Timestamp."""
+    ts = pd.to_datetime(value, unit="s", utc=True, errors="coerce")
+    if pd.isna(ts):
+        ts = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return ts.normalize()
+
+
+def parse_protocol_tvl(payload: Any, protocol: str) -> List[Dict[str, Any]]:
+    """Parse /protocol/{slug} -> rows {protocol, date, tvl_usd, source}."""
+    rows: List[Dict[str, Any]] = []
+    series = payload.get("tvl", []) if isinstance(payload, dict) else []
+    for item in series:
+        date = _to_daily_utc(item.get("date"))
+        value = pd.to_numeric(pd.Series([item.get("totalLiquidityUSD", item.get("tvl"))]), errors="coerce").iloc[0]
+        if date is None or pd.isna(value) or float(value) < 0:
+            continue
+        rows.append({"protocol": protocol, "date": date, "tvl_usd": float(value), "source": "defillama"})
+    return rows
+
+
+def parse_chain_tvl(payload: Any, chain: str) -> List[Dict[str, Any]]:
+    """Parse /v2/historicalChainTvl/{chain} -> rows {chain, date, tvl_usd, source}."""
+    rows: List[Dict[str, Any]] = []
+    series = payload if isinstance(payload, list) else payload.get("data", []) if isinstance(payload, dict) else []
+    for item in series:
+        date = _to_daily_utc(item.get("date"))
+        value = pd.to_numeric(pd.Series([item.get("tvl", item.get("totalLiquidityUSD"))]), errors="coerce").iloc[0]
+        if date is None or pd.isna(value) or float(value) < 0:
+            continue
+        rows.append({"chain": chain, "date": date, "tvl_usd": float(value), "source": "defillama"})
+    return rows
+
+
+def parse_pools(payload: Any, top_n: int, ts_utc: pd.Timestamp) -> List[Dict[str, Any]]:
+    """Parse /pools -> top-N (by TVL) rows of pool APY + TVL, stamped ``ts_utc``."""
+    data = payload.get("data", []) if isinstance(payload, dict) else (payload if isinstance(payload, list) else [])
+    rows: List[Dict[str, Any]] = []
+    for item in data:
+        tvl = pd.to_numeric(pd.Series([item.get("tvlUsd")]), errors="coerce").iloc[0]
+        pool_id = item.get("pool")
+        if pool_id in (None, "") or pd.isna(tvl):
+            continue
+        apy = pd.to_numeric(pd.Series([item.get("apy")]), errors="coerce").iloc[0]
+        rows.append(
+            {
+                "pool_id": str(pool_id),
+                "project": str(item.get("project", "")),
+                "symbol": str(item.get("symbol", "")),
+                "chain": str(item.get("chain", "")),
+                "apy": None if pd.isna(apy) else float(apy),
+                "tvl_usd": float(tvl),
+                "ts_utc": ts_utc,
+                "source": "defillama",
+            }
+        )
+    rows.sort(key=lambda r: r["tvl_usd"], reverse=True)
+    return rows[:top_n]
+
+
+def parse_stablecoins(payload: Any, top_n: int, ts_utc: pd.Timestamp) -> List[Dict[str, Any]]:
+    """Parse /stablecoins -> top-N circulating rows, stamped ``ts_utc``."""
+    assets = payload.get("peggedAssets", []) if isinstance(payload, dict) else []
+    rows: List[Dict[str, Any]] = []
+    for item in assets:
+        circ = item.get("circulating", {})
+        value = circ.get("peggedUSD") if isinstance(circ, dict) else None
+        value = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        name = item.get("name")
+        if name in (None, "") or pd.isna(value) or float(value) < 0:
+            continue
+        rows.append(
+            {
+                "stablecoin": str(name),
+                "symbol": str(item.get("symbol", "")),
+                "circulating_usd": float(value),
+                "ts_utc": ts_utc,
+                "source": "defillama",
+            }
+        )
+    rows.sort(key=lambda r: r["circulating_usd"], reverse=True)
+    return rows[:top_n]
+
+
+def collect_tvl(output_dir, cfg, session, write=True) -> pd.DataFrame:
+    """Collect protocol TVL time series -> <output_dir>/tvl.parquet."""
+    base_url = str(cfg.get("base_url", _DEFAULT_BASE_URL)).rstrip("/")
+    protocols = cfg.get("protocols", _DEFAULT_PROTOCOLS)
+    rows: List[Dict[str, Any]] = []
+    for slug in protocols:
+        try:
+            payload = _get_json(session, f"{base_url}/protocol/{slug}")
+            r = parse_protocol_tvl(payload, slug)
+            rows.extend(r)
+            _logger.info("defillama protocol tvl %s: %d rows", slug, len(r))
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("defillama protocol tvl %s failed: %s", slug, exc)
+        _time.sleep(_SLEEP)
+    df = pd.DataFrame(rows, columns=["protocol", "date", "tvl_usd", "source"])
+    if not df.empty and write:
+        total = _upsert(df, ["protocol", "date"], Path(output_dir) / "tvl.parquet")
+        _logger.info("defillama tvl: wrote %d new, %d total", len(df), total)
+    return df
+
+
+def collect_chains(output_dir, cfg, session, write=True) -> pd.DataFrame:
+    """Collect chain TVL time series -> <output_dir>/chains.parquet."""
+    base_url = str(cfg.get("base_url", _DEFAULT_BASE_URL)).rstrip("/")
+    chains = cfg.get("chains", _DEFAULT_CHAINS)
+    rows: List[Dict[str, Any]] = []
+    for chain in chains:
+        try:
+            payload = _get_json(session, f"{base_url}/v2/historicalChainTvl/{chain}")
+            r = parse_chain_tvl(payload, chain)
+            rows.extend(r)
+            _logger.info("defillama chain tvl %s: %d rows", chain, len(r))
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("defillama chain tvl %s failed: %s", chain, exc)
+        _time.sleep(_SLEEP)
+    df = pd.DataFrame(rows, columns=["chain", "date", "tvl_usd", "source"])
+    if not df.empty and write:
+        total = _upsert(df, ["chain", "date"], Path(output_dir) / "chains.parquet")
+        _logger.info("defillama chains: wrote %d new, %d total", len(df), total)
+    return df
+
+
+def collect_yields(output_dir, cfg, session, write=True) -> pd.DataFrame:
+    """Collect pool APY/TVL snapshot -> <output_dir>/yields.parquet."""
+    yields_url = str(cfg.get("yields_url", _DEFAULT_YIELDS_URL)).rstrip("/")
+    top_n = int(cfg.get("yields_top_n", _DEFAULT_YIELDS_TOP_N))
+    ts_utc = pd.Timestamp.utcnow().normalize()
+    rows: List[Dict[str, Any]] = []
+    try:
+        payload = _get_json(session, f"{yields_url}/pools")
+        rows = parse_pools(payload, top_n, ts_utc)
+        _logger.info("defillama pools: %d rows (top %d)", len(rows), top_n)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("defillama pools failed: %s", exc)
+    df = pd.DataFrame(
+        rows, columns=["pool_id", "project", "symbol", "chain", "apy", "tvl_usd", "ts_utc", "source"]
+    )
+    if not df.empty and write:
+        total = _upsert(df, ["pool_id", "ts_utc"], Path(output_dir) / "yields.parquet")
+        _logger.info("defillama yields: wrote %d new, %d total", len(df), total)
+    return df
+
+
+def collect_stablecoins(output_dir, cfg, session, write=True) -> pd.DataFrame:
+    """Collect stablecoin circulating snapshot -> <output_dir>/stablecoins.parquet."""
+    stable_url = str(cfg.get("stablecoins_url", _DEFAULT_STABLE_URL)).rstrip("/")
+    top_n = int(cfg.get("stablecoins_top_n", _DEFAULT_STABLE_TOP_N))
+    ts_utc = pd.Timestamp.utcnow().normalize()
+    rows: List[Dict[str, Any]] = []
+    try:
+        payload = _get_json(session, f"{stable_url}/stablecoins", {"includePrices": "false"})
+        rows = parse_stablecoins(payload, top_n, ts_utc)
+        _logger.info("defillama stablecoins: %d rows (top %d)", len(rows), top_n)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("defillama stablecoins failed: %s", exc)
+    df = pd.DataFrame(
+        rows, columns=["stablecoin", "symbol", "circulating_usd", "ts_utc", "source"]
+    )
+    if not df.empty and write:
+        total = _upsert(df, ["stablecoin", "ts_utc"], Path(output_dir) / "stablecoins.parquet")
+        _logger.info("defillama stablecoins: wrote %d new, %d total", len(df), total)
+    return df
+
+
+def collect_defillama(
+    output_dir: "str | Path" = _DEFAULT_OUTPUT_DIR,
+    config: Optional[Dict[str, Any]] = None,
+    session: "Optional[_requests.Session]" = None,
+    write: bool = True,
+) -> Dict[str, pd.DataFrame]:
+    """Run all four DeFiLlama collectors; return {name: frame}."""
+    cfg = config if config is not None else load_collector_config()
+    output_dir = cfg.get("output_dir", _DEFAULT_OUTPUT_DIR) if config is None else output_dir
+    if session is None:
+        session = _requests.Session()
+        session.headers["User-Agent"] = "chf-defillama-collector/1.0"
+    return {
+        "tvl": collect_tvl(output_dir, cfg, session, write),
+        "chains": collect_chains(output_dir, cfg, session, write),
+        "yields": collect_yields(output_dir, cfg, session, write),
+        "stablecoins": collect_stablecoins(output_dir, cfg, session, write),
+    }
+
+
+def main() -> None:
+    parser = _argparse.ArgumentParser(description="Collect DeFiLlama TVL/yields/stablecoins (keyless)")
+    parser.add_argument("--output-dir", default=None, help="override output dir")
+    parser.add_argument("--config", default=_CONFIG_PATH)
+    args = parser.parse_args()
+    cfg = load_collector_config(args.config)
+    output_dir = args.output_dir or cfg.get("output_dir", _DEFAULT_OUTPUT_DIR)
+    collect_defillama(output_dir=output_dir, config=cfg)
+
+
+if __name__ == "__main__":
+    main()

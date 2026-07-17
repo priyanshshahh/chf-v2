@@ -10,6 +10,10 @@ import numpy as np
 import pandas as pd
 
 from agents.base import AgentBase
+from features.feature_source_map import (
+    FEATURE_SOURCE_MAP_FILENAME,
+    write_feature_source_map,
+)
 from features.feature_engineering import (
     METADATA_COLUMNS,
     build_feature_dictionary,
@@ -708,6 +712,22 @@ class FeatureAgent(AgentBase):
             return cols
         return [c for c in cols if c not in DIAGNOSTIC_FEATURE_COLUMNS]
 
+    def _build_feature_source_map(self, market_features: pd.DataFrame, onchain_features: pd.DataFrame) -> Dict[str, str]:
+        """Explicit column -> source ("market"|"onchain") map derived from which builder
+        actually produced each column — the authoritative replacement for the legacy
+        ONCHAIN_HINTS substring heuristic in downstream agents (NEXT_STEPS item [4]).
+
+        Onchain columns are tagged first and market columns last so that, in the
+        (never-expected) event of a name collision, the market tag wins — matching the
+        conservative default of the legacy heuristic ("not onchain" => market).
+        """
+        source_map: Dict[str, str] = {}
+        for col in self._feature_columns(onchain_features):
+            source_map[col] = "onchain"
+        for col in self._feature_columns(market_features):
+            source_map[col] = "market"
+        return source_map
+
     def _series_or_false(self, df: pd.DataFrame, col: str) -> pd.Series:
         if col in df.columns:
             return df[col].fillna(False).astype(bool)
@@ -862,6 +882,7 @@ class FeatureAgent(AgentBase):
         manifest_path = self.output_dir / "feature_manifest.json"
         dictionary_path = self.output_dir / "feature_dictionary.json"
         keep_list_path = self.output_dir / "feature_keep_list.json"
+        source_map_path = self.output_dir / FEATURE_SOURCE_MAP_FILENAME
         quality_path = self.output_dir / "data_quality_features.md"
         partition_root = self.output_dir / "partitioned"
 
@@ -880,6 +901,12 @@ class FeatureAgent(AgentBase):
             json.dump(dictionary, f, indent=2)
         with open(keep_list_path, "w") as f:
             json.dump(keep_info, f, indent=2)
+        write_feature_source_map(
+            source_map_path,
+            self._build_feature_source_map(market_features, onchain_features),
+            generated_by="agents/feature_agent.py",
+            extra_meta={"run_id": self.run_id, "snapshot_id": self.snapshot_id, "method": "builder_provenance"},
+        )
         if partition_root.exists():
             shutil.rmtree(partition_root)
         self._write_partitioned(partition_root, market_features, full_features)
@@ -926,6 +953,7 @@ class FeatureAgent(AgentBase):
                 "feature_manifest": str(manifest_path),
                 "feature_dictionary": str(dictionary_path),
                 "feature_keep_list": str(keep_list_path),
+                "feature_source_map": str(source_map_path),
                 "data_quality_report": str(quality_path),
                 "partitioned": str(partition_root),
             },

@@ -1,0 +1,147 @@
+# CHF multi-strategy sleeve layer — parameters + regime multiplier table.
+# All sleeves are deterministic (NO LLM). See strategies/ package.
+
+paths:
+  market_data: "data/raw/market/market_ohlcv.parquet"
+  output_dir: "data/strategies"
+  funding_rates: "data/external/funding_rates.parquet"
+  derivatives: "data/external/derivatives_okx.parquet"        # OKX funding/OI/LSR (perp)
+  defillama_yields: "data/external/defillama/yields.parquet"  # pool APY + TVL
+  altcoin_season: "cmc_complete/data/coinmarketcap_data/pro_api_index_historical/cmc_altcoin_season.parquet"
+  fear_greed: "cmc_complete/data/coinmarketcap_data/pro_api_index_historical/cmc_fear_greed.parquet"
+  global_metrics: "cmc_complete/data/coinmarketcap_data/pro_api_global_metrics_historical/cmc_global_metrics.parquet"
+
+sleeves:
+  sleeve_trend:
+    # ANB-style parsimonious trend: 7 fixed parameters total.
+    core_symbols: [BTC, ETH, SOL]
+    top_n_liquid: 10
+    adv_window_days: 90
+    return_windows: [10, 30, 90]
+    min_votes: 2
+    vol_window_days: 30
+
+  sleeve_xsmom:
+    # BTC-relative cross-sectional momentum with BTC 100d-MA regime gate.
+    universe_size: 50
+    adv_window_days: 90
+    momentum_window_days: 90
+    quintile: 5                 # hold top n/quintile (10 of 50) equal weight
+    btc_ma_window_days: 100
+    altseason_threshold: 50.0
+    altseason_max_staleness_days: 14
+    capped_gross: 0.5           # altseason <= threshold (or data missing/stale)
+    full_gross: 1.0             # altseason > threshold
+
+  sleeve_carry:
+    # Funding-rate basis capture — spot-leg paper PROXY (see carry_sleeve.py).
+    funding_path: "data/external/funding_rates.parquet"
+    trailing_days: 7
+    entry_threshold_ann: 0.10   # enter when 7d-mean funding annualized > 10%
+    exit_threshold_ann: 0.05    # exit below 5% (hysteresis)
+    max_slots: 3                # each slot = 1/3 of book; unfilled -> cash
+    diagnostics_path: "data/strategies/carry_diagnostics.parquet"
+
+  sleeve_technical:
+    # virattt 5-family ensemble, crypto-tuned (sqrt(365); 21/63/126d windows).
+    universe_size: 20
+    adv_window_days: 90
+    min_history_days: 200
+    top_k: 5
+    score_threshold: 0.2
+    vol_window_days: 30
+    # family combine weights are fixed in code: .25/.25/.20/.15/.15
+
+  sleeve_carry_neutral:
+    # TRUE delta-neutral carry: long spot + short perp per active pair. P&L ~=
+    # accrued perp funding - costs (industry core: Nickel/Pythagoras/ANB).
+    # Requires an allow_short book (sleeve_carry_neutral, margin_requirement 0.5).
+    funding_path: "data/external/derivatives_okx.parquet"
+    trailing_days: 7
+    entry_threshold_ann: 0.10   # annualized funding (rate*3*365) entry
+    exit_threshold_ann: 0.05
+    max_slots: 3
+    gross_target: 0.9           # summed long-spot gross across active pairs
+    diagnostics_path: "data/strategies/carry_neutral_diagnostics.parquet"
+
+  sleeve_statarb:
+    # Cointegration / z-score pairs trading (market-neutral, dollar-neutral).
+    # Requires an allow_short book (sleeve_statarb).
+    configured_pairs: [[ETH, BTC]]
+    auto_pairs_from_top_n: 12
+    adv_window_days: 90
+    max_pairs: 3
+    ols_window_days: 60
+    zscore_window_days: 60
+    min_correlation: 0.6
+    entry_z: 2.0
+    exit_z: 0.5
+    stop_z: 4.0
+    gross_target: 1.0
+    min_history_days: 130
+
+  sleeve_defi_yield:
+    # DeFiLlama yield rotation (long-only, uncorrelated; Arca/Apollo style).
+    yields_path: "data/external/defillama/yields.parquet"
+    tvl_floor_usd: 50000000       # 50M TVL floor
+    tvl_reference_usd: 1000000000 # 1B reference for the risk (TVL) weight
+    top_k: 5
+    gross_target: 0.9
+    min_apy: 0.005
+    diagnostics_path: "data/strategies/defi_yield_diagnostics.parquet"
+
+macro_overlay:
+  # Gross-exposure multiplier from regime (+ optional FRED). PROPOSAL input to
+  # the allocator for the risk-on sleeves only; never auto-executes.
+  regime_path: "data/strategies/regime_daily.parquet"
+  macro_fred_path: "data/external/macro_fred.parquet"   # empty in this env -> degrades
+  min_multiplier: 0.2
+  regime_multiplier:
+    risk_on: 1.0
+    neutral: 0.85
+    risk_off: 0.60
+    stress: 0.35
+  output_parquet: "data/strategies/macro_overlay.parquet"
+  output_json: "data/strategies/macro_overlay_latest.json"
+
+regime:
+  btc_ma_window_days: 100
+  breadth_ma_window_days: 50
+  breadth_risk_on_min: 0.5
+  corr_window_days: 60
+  corr_top_n: 20
+  corr_adv_window_days: 90
+  corr_spike_threshold: 0.8
+  dominance_ma_window_days: 30
+  output_parquet: "data/strategies/regime_daily.parquet"
+  output_json: "data/strategies/regime_latest.json"
+
+# Sleeve gross multipliers applied by the allocator per regime.
+# Carry is market-neutral in its true (long-spot/short-perp) form, so it keeps
+# full allocation in stress; directional sleeves are cut or zeroed.
+regime_multipliers:
+  risk_on:  {sleeve_trend: 1.0, sleeve_xsmom: 1.0,  sleeve_carry: 1.0, sleeve_technical: 1.0,  sleeve_carry_neutral: 1.0, sleeve_statarb: 1.0, sleeve_defi_yield: 1.0}
+  neutral:  {sleeve_trend: 1.0, sleeve_xsmom: 0.75, sleeve_carry: 1.0, sleeve_technical: 0.75, sleeve_carry_neutral: 1.0, sleeve_statarb: 1.0, sleeve_defi_yield: 1.0}
+  risk_off: {sleeve_trend: 0.5, sleeve_xsmom: 0.25, sleeve_carry: 1.0, sleeve_technical: 0.5,  sleeve_carry_neutral: 1.0, sleeve_statarb: 1.0, sleeve_defi_yield: 1.0}
+  stress:   {sleeve_trend: 0.5, sleeve_xsmom: 0.0,  sleeve_carry: 1.0, sleeve_technical: 0.25, sleeve_carry_neutral: 1.0, sleeve_statarb: 1.0, sleeve_defi_yield: 1.0}
+
+allocator:
+  # Pod-shop capital allocator. Monthly cadence; PROPOSAL artifact only —
+  # never auto-executes (humans own capital allocation via the approval gate).
+  lookback_days: 90             # trailing window for Sortino
+  min_equity_days: 30           # min paper-book history before it's trusted
+  sortino_floor: 0.1            # allocate proportional to max(sortino, 0.1)
+  weight_floor: 0.05            # min 5% per sleeve (pre-multiplier)
+  weight_cap: 0.40              # max 40% per sleeve (pre-multiplier)
+  backtest_rebalance_days: 7    # weekly rebalance for the fallback backtest
+  backtest_cost_bps: 20
+  papertrade_dir: "data/papertrade"
+  output_parquet: "data/strategies/sleeve_allocation.parquet"
+  output_json: "data/strategies/sleeve_allocation_proposal.json"
+
+# Paper book settings used by run_sleeves.py when appending books to
+# configs/run_config.yaml papertrade.books.
+papertrade_books:
+  rebalance: weekly
+  cost_bps: 20
+  starting_cash: 100000

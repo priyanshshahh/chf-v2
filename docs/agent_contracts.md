@@ -6,7 +6,9 @@ This repo implements deterministic pipeline workers, not autonomous AI agents. E
 
 The public pipeline order is:
 
-`universe -> market -> onchain -> clean -> features -> labels -> models -> portfolio -> backtest`
+`universe -> market -> onchain -> features -> labels -> models -> alpha_research -> portfolio -> backtest`
+
+Notes: the `clean` stage runs only inside the `full` pipeline runner (`python main.py full`), not in `run_all.sh`; `alpha_research` (AlphaResearchAgent) is the signal-only research expansion stage and cannot claim alpha. A `papertrade` stage (virtual per-strategy forward validation, `docs/PAPER_TRADING.md`) runs downstream of `portfolio` and outside the research DAG.
 
 ## UniverseAgent
 

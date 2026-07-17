@@ -19,6 +19,9 @@ from providers.market_fallbacks import FallbackFetchResult
 from scripts.verify_market_run import inspect_market_outputs, validate_market_outputs
 
 
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "market"
+
+
 def _cfg(tmp_path: Path) -> dict:
     cfg = copy.deepcopy(load_config())
     cfg["_project_root"] = str(tmp_path)
@@ -824,7 +827,7 @@ def test_cache_is_used_before_live_api(tmp_path):
         timeframe="1d",
         live_api_enabled=False,
         use_fixtures=True,
-        fixture_dir=Path("/Users/priyansh/Desktop/chf/tests/fixtures/market"),
+        fixture_dir=FIXTURE_DIR,
     )
     df1 = provider.fetch_ohlcv("BTC/USDC", since_dt=datetime_from_str("2024-01-01T00:00:00Z"))
     assert not df1.empty
@@ -834,7 +837,7 @@ def test_cache_is_used_before_live_api(tmp_path):
         timeframe="1d",
         live_api_enabled=False,
         use_fixtures=False,
-        fixture_dir=Path("/Users/priyansh/Desktop/chf/tests/fixtures/market"),
+        fixture_dir=FIXTURE_DIR,
     )
     df2 = provider2.fetch_ohlcv("BTC/USDC", since_dt=datetime_from_str("2024-01-01T00:00:00Z"))
     assert not df2.empty
@@ -989,7 +992,7 @@ def test_provider_fallback_after_rate_limit(tmp_path, monkeypatch):
             return pd.DataFrame()
         if self.exchange_name == "kucoin":
             if exchange_symbol == "BTC/USDC":
-                rows = json.loads(Path("/Users/priyansh/Desktop/chf/tests/fixtures/market/ccxt_kucoin_ohlcv_BTC_USDC_2024-01-01_1d.json").read_text())
+                rows = json.loads((FIXTURE_DIR / "ccxt_kucoin_ohlcv_BTC_USDC_2024-01-01_1d.json").read_text())
                 return pd.DataFrame(
                     {
                         "date_ts": pd.to_datetime([row[0] for row in rows], unit="ms", utc=True),
@@ -1487,10 +1490,15 @@ def test_verifier_reports_bad_rows_clearly(tmp_path):
 
 
 def test_verifier_does_not_falsely_fail_on_valid_10x365_output():
+    # The canonical output in data/raw/market is produced by the survivorship-free
+    # market_data_pit section, which explicitly sets allow_usdt_fallback: true
+    # (non-Binance SYM/USDT pairs are a documented research caveat; Binance stays
+    # forbidden). Validate against the section that produced the data — merging a
+    # section that forbids USDT (e.g. market_data_10x365) would falsely fail.
     cfg = load_config()
     cfg = {"_project_root": cfg["_project_root"], **cfg}
     merged = dict(cfg)
     merged["market_data"] = dict(cfg["market_data"])
-    merged["market_data"].update(cfg["market_data_10x365"])
+    merged["market_data"].update(cfg["market_data_pit"])
     failures = validate_market_outputs(merged)
     assert failures == []

@@ -6,8 +6,10 @@ from marketing copy), credits/rate limits, how each dataset feeds the pipeline, 
 that talks to CMC, and the integrity rules. CMC is the **primary universe-membership
 source** for CHF and the reason the production universe is survivorship-bias-free.
 
-Companion data folder: [`../coinmarketcap_data/`](../coinmarketcap_data/) holds a
-committed copy of every CMC dataset described here. Related: `docs/UNIVERSE_AGENT.md`
+Companion data folder: [`../cmc_complete/data/coinmarketcap_data/`](../cmc_complete/data/coinmarketcap_data/)
+holds every CMC dataset described here (parquet + manifest + raw API sample per dataset);
+[`../cmc_complete/`](../cmc_complete/) is the single canonical folder for all CMC data,
+code copies, and docs — see `cmc_complete/README.txt`. Related: `docs/UNIVERSE_AGENT.md`
 (how the data becomes the universe). The original CMC access-limitation probe
 transcript is consolidated into this document (see the sections below).
 
@@ -60,9 +62,15 @@ first-listing date), category `tags`, and a PIT `quote` (price / marketCap / vol
 (matches the dataset's first row exactly); LTC ranked #2 in 2014.
 Ingested by `scripts/build_cmc_web_history.py`.
 
-### 2.2 Pro `/v2/cryptocurrency/quotes/historical` ✅ (36 months on Hobbyist)
+### 2.2 Pro `/v3/cryptocurrency/quotes/historical` ✅ (36 months on Hobbyist)
 Daily `price` / `market_cap` / `volume_24h` per `cmc_id`, works for many delisted coins
 inside the window. Used by `build_cmc_quotes_history.py`. **Credits**: 1 per 100 data points.
+Note: the original access-probe (§9/§10) tested the sibling **v2** endpoint (also live and
+functional), but production collection uses **v3** because it supports batching multiple
+`cmc_id`s per request — far more credit-efficient when pulling thousands of coins.
+**[Q&A: daily-end quotes only (`interval=daily`); NOT minute-to-minute — no intraday/minute-level
+CMC data exists anywhere in this project. v2 vs v3: both are live endpoints; v2 is used only by
+the access-probe script for testing, v3 is what every production collector calls.]**
 
 ### 2.3 Pro `/v1/cryptocurrency/listings/historical` ⚠️ (Hobbyist = 1 month)
 The "proper" Pro PIT-membership endpoint. Params CHF sends (`providers/coinmarketcap.py
@@ -71,11 +79,21 @@ sort_dir=asc, cryptocurrency_type=all, aux=platform,tags,date_added,circulating_
 total_supply,max_supply,cmc_rank,num_market_pairs`. **Credit**: 1 per 100 coins.
 On Hobbyist it returns **HTTP 400** beyond ~1 month ("plan allows 1 months of historical
 access"). Used only for a 1-month proof sample (`build_cmc_history.py`).
+**[Q&A: little that's unique here — a single-date (2026-06-01) proof sample capped at 1 month
+by the Hobbyist plan; the keyless `data-api/v3` listings source (§2.1) supersedes it for real
+historical coverage.]**
 
 ### 2.4 Pro `/v2/cryptocurrency/ohlcv/historical` ❌ not in plan
 True daily OHLCV per `cmc_id`. On Hobbyist: **HTTP 403, error code 1006** ("plan does not
 support this endpoint"). `fetch_ohlcv_historical` exists in the provider but yields nothing
 on the current key.
+**[Q&A: correct, this would contain true daily transaction OHLCV (open/high/low/close/volume),
+not just quotes. 24-hour days are UTC-normalized (00:00–23:59 UTC) per
+`providers/coinmarketcap.py`'s `_to_utc_timestamp(...).normalize()`. Once unblocked, both active
+and inactive/delisted coins would be included — the sibling `quotes/historical` collector
+(§2.2) already builds its universe as active ∪ delisted-in-window coins, and
+`src/cmc/collectors/ohlcv.py` is scaffolded to reuse the same approach; only a 2-coin (BTC/ETH)
+proof pull has run so far.]**
 
 ### 2.5 Pro `/v1/cryptocurrency/map` ✅
 Symbol/`cmc_id`/slug/`is_active` directory; `map?listing_status=inactive` enumerates
@@ -93,7 +111,7 @@ limits/credits **before** spending anything (free call).
 | Endpoint | Result on Hobbyist | Detail |
 |---|---|---|
 | `data-api/v3 listings/historical` (keyless) | ✅ unlimited depth, no key | back to 2013-05-05, incl. delisted |
-| `v2 quotes/historical` | ✅ **36 months** | daily price/mcap/vol; 1 credit / 100 points |
+| `v3 quotes/historical` | ✅ **36 months** | daily price/mcap/vol; 1 credit / 100 points |
 | `v1 listings/historical` | ❌ **1 month** | HTTP 400 "plan allows 1 months"; 1 credit / 100 coins |
 | `v2 ohlcv/historical` | ❌ **not in plan** | HTTP 403 code 1006 |
 | `map` / `map?listing_status=inactive` | ✅ | ≈1,756 inactive coins enumerable |
@@ -110,8 +128,8 @@ Probe transcript: see the original-probe section below. Diagnostics:
 
 ## 4. The data we actually got (real, on disk)
 
-Committed copies live in [`../coinmarketcap_data/`](../coinmarketcap_data/); working copies
-under `data/external/` (gitignored). Numbers are from the live files.
+Committed copies live in [`../cmc_complete/data/coinmarketcap_data/`](../cmc_complete/data/coinmarketcap_data/);
+working copies under `data/external/` (gitignored). Numbers are from the live files.
 
 ### 4.1 `cmc_web_listings_historical.parquet` — keyless data-API (PRODUCTION)
 - **19,800 rows · 66 monthly snapshots · 2021-01-01 → 2026-06-01 · top-300/snapshot.**
@@ -123,6 +141,10 @@ under `data/external/` (gitignored). Numbers are from the live files.
   date_added, raw_category_tags, source`.
 - Delisted/collapsed names retained in their historical months: **FTT** (2021-01…2022),
   **LUNA** (last seen 2025-03), **CEL, HT, EOS, MIOTA, ABBC, GNT**, etc.
+- **[Q&A: confirmed MONTHLY, not daily — 66 snapshots; a separate DAILY extraction of the same
+  keyless source also exists (§4.5), covering 2023-06-19 to 2026-06-17. No # of wallets/addresses
+  is included — CMC doesn't provide this; the project's only address-count data (CoinMetrics
+  `AdrActCnt`) is unrelated to CMC.]**
 
 ### 4.2 `cmc_quotes_history.parquet` + `cmc_prices_history.parquet` — Pro quotes/historical
 - **225,854 rows each · 299 symbols · ~36 months daily.**
@@ -137,14 +159,14 @@ under `data/external/` (gitignored). Numbers are from the live files.
 - Manifest `cmc_history_manifest.json`: `plan_history_window_hit: false`, `top_n: 100`.
 
 ### 4.4 Raw API-response samples
-`coinmarketcap_data/*/raw_api_samples/*.json` — untouched response bodies (keyless
+`cmc_complete/data/coinmarketcap_data/*/raw_api_samples/*.json` — untouched response bodies (keyless
 `listings_historical_2021-01-01_top300.json` & `2024-02-01`, and Pro
 `listings_2026-06-01.json`) so the exact API shape is inspectable. No keys in them.
 
 ### 4.5 `cmc_daily_listings_historical.parquet` — keyless daily 3-year extraction
 A separate, **daily**-granularity extraction from the keyless data-API, produced by the
 live subscription test in §10 and stored under
-[`../coinmarketcap_extract/`](../coinmarketcap_extract/) (`processed/`):
+[`../cmc_complete/data/keyless_daily_extraction/`](../cmc_complete/data/keyless_daily_extraction/) (`processed/`):
 - **218,643 rows · 1,095 daily snapshots · 2023-06-19 → 2026-06-17 · top-200/day.**
 - **507 unique `cmc_id`s · 516 unique symbols** — ~300 names churned in/out over 3 years,
   the measurable signature of survivorship-free membership.
@@ -194,7 +216,7 @@ on-chain gate keying on symbol, and selection ranking by `market_cap_usd` rather
 Caching: each CMC response is cached on disk so re-runs are free and reproducible
 (`data/cache/cmc_web/` ≈21 MB / 129 files; `data/cache/cmc_quotes/` ≈137 MB / 302 files).
 Caches are gitignored; the normalized parquet outputs are what travel in
-`coinmarketcap_data/`.
+`cmc_complete/data/coinmarketcap_data/`.
 
 ---
 
@@ -304,9 +326,10 @@ therefore **cannot** build a 3-year historical ticker list.
 
 ### 10.2 The extractor we built
 
-`coinmarketcap_extract/extract_cmc_daily_history.py` — a self-contained, resumable
-extractor that pulls **daily** historical top-N snapshots from the keyless data-API and
-writes a tidy combined table + raw JSON + a provenance manifest:
+`cmc_complete/code/keyless_extractor/extract_cmc_daily_history.py` — a self-contained,
+resumable extractor that pulls **daily** historical top-N snapshots from the keyless
+data-API and writes a tidy combined table + raw JSON + a provenance manifest into
+`cmc_complete/data/keyless_daily_extraction/`:
 
 - **Granularity** `--freq daily` (also `weekly`/`monthly`); default span 3 years back.
 - **Coverage** `--top 200` default (≥100 plus churn headroom so the historical top-100 is
@@ -321,13 +344,13 @@ writes a tidy combined table + raw JSON + a provenance manifest:
 Run used to produce the data, and reproduction/extension commands:
 ```bash
 # 3 years daily (what we ran)
-python3 coinmarketcap_extract/extract_cmc_daily_history.py --years 3 --top 200 --min-seconds 1.2
+python3 cmc_complete/code/keyless_extractor/extract_cmc_daily_history.py --years 3 --top 200 --min-seconds 1.2
 
 # explicit window
-python3 coinmarketcap_extract/extract_cmc_daily_history.py --start 2023-06-17 --end 2026-06-17 --top 200
+python3 cmc_complete/code/keyless_extractor/extract_cmc_daily_history.py --start 2023-06-17 --end 2026-06-17 --top 200
 
 # "entire history" later — monthly back to CMC's 2013 origin (daily would be ~4,700 calls)
-python3 coinmarketcap_extract/extract_cmc_daily_history.py --freq monthly --start 2013-05-05 --top 300
+python3 cmc_complete/code/keyless_extractor/extract_cmc_daily_history.py --freq monthly --start 2013-05-05 --top 300
 ```
 The same keyless endpoint reaches back to **2013-05-05**. Start monthly (cheap, ~157
 months) to map coverage, then densify to daily for the windows the model needs; everything
@@ -349,9 +372,10 @@ is cached, so densifying only fetches the missing dates.
 That 507 unique coins cycle through a 200-deep daily list is the measurable signature of
 survivorship-free membership — ~300 names churned in and out over 3 years. A 7-day
 verification slice ran first and confirmed real data (BTC #1, ETH #2, USDT #3 — 1,050 rows
-/ 152 unique `cmc_id`s, 0 failures). Outputs land under `coinmarketcap_extract/processed/`
-(parquet + CSV + manifest) and `coinmarketcap_extract/raw_daily_json/YYYY-MM-DD.json`
-(per-day audit trail). See §4.5 for the dataset summary.
+/ 152 unique `cmc_id`s, 0 failures). Outputs land under
+`cmc_complete/data/keyless_daily_extraction/processed/` (parquet + CSV + manifest) and
+`cmc_complete/data/keyless_daily_extraction/raw_daily_json/YYYY-MM-DD.json` (per-day audit
+trail). See §4.5 for the dataset summary.
 
 > **Caveat on `is_active`:** the keyless endpoint returns `is_active=1` for every row,
 > because each row reflects the snapshot date on which the coin *was* active/ranked. The
@@ -369,4 +393,97 @@ rate limit apply to `quotes/historical`. The full 3-year **daily** historical ti
 — active + inactive coins with daily market data — was obtained via the free keyless
 data-API, with resumable code to extract and extend it: **1,095 daily snapshots,
 2023-06-19 → 2026-06-17, 218,643 rows, 507 unique coins.**
-</content>
+
+---
+
+## 11. New Pro-API datasets (2026-07-01 build) — the extra data the professor asked for
+
+Collected by the `src/cmc/` pipeline (`python -m src.cmc.maintain`), one directory per
+domain under `coinmarketcap_data/`, each with `<name>.parquet` + `manifest.json` +
+`raw_api_samples/`. All money is **USD**; all dates are **YYYY-MM-DD**; every dataset is
+keyed on a stable id/date so the monthly maintenance job is idempotent (re-running never
+duplicates rows). Row counts / coverage below are from the live build.
+
+| # | Dataset (dir / file) | CMC endpoint | Key | Columns | Coverage | Rows | Status |
+|---|---|---|---|---|---|---|---|
+| 1 | `pro_api_map/cmc_map.parquet` | `/v1/cryptocurrency/map` (listing_status = active+inactive+untracked) | `cmc_id` | cmc_id, symbol, name, slug, is_active, first_historical_data, last_historical_data, source | 2010-07-13 → 2026-06-30 (first/last historical) | **37,127** (8,132 active / 28,995 inactive) | **Collected** |
+| 2 | `pro_api_global_metrics_historical/cmc_global_metrics.parquet` | `/v1/global-metrics/quotes/historical` (interval=daily) | `date` | date, total_market_cap, total_volume_24h, altcoin_market_cap, btc_dominance, eth_dominance, active_cryptocurrencies | 2023-07-02 → 2026-07-01 | **1,096** | **Collected — plan-capped at 36 months** (degraded per FR-013; `achieved_full_history=false`) |
+| 3 | `pro_api_index_historical/cmc_fear_greed.parquet` | `/v3/fear-and-greed/historical` | `date` | date, value, value_classification | 2023-06-29 → 2026-06-30 | **1,098** | **Collected** |
+| 4 | `pro_api_index_historical/cmc_altcoin_season.parquet` | `/v1/altcoin-season-index/historical` (timeframe=90d) | `date` | date, altcoin_index, altcoin_marketcap | 2026-04-03 → 2026-07-01 | **90** | **Collected — endpoint only exposes 90d** (max available; noted in manifest) |
+| 5 | `pro_api_exchange_map/cmc_exchange_map.parquet` | `/v1/exchange/map` (active+inactive) | `exchange_id` | exchange_id, name, slug, is_active, first_historical_data, last_historical_data, source | 2018-04-26 → 2026-07-01 (first/last historical) | **1,257** | **Collected** |
+| 6 | `pro_api_fiat_map/cmc_fiat_map.parquet` | `/v1/fiat/map` (include_metals=true) | `fiat_id` | fiat_id, symbol, name, sign, source | reference table (no dates) | **97** | **Collected** — currency reference for USD-conversion work |
+| 7 | `pro_api_ohlcv_historical/cmc_ohlcv_sample.parquet` | `/v2/cryptocurrency/ohlcv/historical` (daily, convert=USD) | `(cmc_id, date)` | cmc_id, date, symbol, open, high, low, close, volume, market_cap | — | **0** | **Sample path built — endpoint NOT in plan** (HTTP 403, code 1006). Errors recorded in manifest. |
+| 8 | `pro_api_index_historical/cmc100_index.parquet` | `/v3/index/cmc100-historical` (daily; + `/v3/index/cmc100-latest`) | `date` | date, value, num_constituents, constituents_json | 2024-01-01 → 2026-07-01 | **913** | **Collected — "the 100"**. Earliest point this plan exposes is 2024-01-01. |
+| 9 | `pro_api_index_historical/cmc20_index.parquet` | `/v3/index/cmc20-historical` (daily; + `/v3/index/cmc20-latest`) | `date` | date, value, num_constituents, constituents_json (id/symbol/weight + priceUsd/units) | 2024-01-01 → 2026-07-01 | **913** | **Collected — "the 20"**. Earliest point this plan exposes is 2024-01-01. |
+| 10 | `pro_api_airdrops/cmc_airdrops.parquet` | `/v1/cryptocurrency/airdrops` (status ENDED/ONGOING/UPCOMING) | `airdrop_id` | airdrop_id, project_name, status, coin_id, coin_symbol, coin_name, start_date, end_date, total_prize, winner_count, link | 2021-05-01 → 2022-11-25 (by start_date) | **426** | **Collected**. `airdrop_id` = reassembled hex Mongo ObjectId. |
+| 11 | `pro_api_fiat_fx/cmc_fiat_usd_snapshot.parquet` | `/v2/tools/price-conversion` (amount=1, id=2781 USD, convert_id per fiat) | `(fiat_id, snapshot_date)` | snapshot_date, fiat_id, fiat_symbol, usd_to_fiat_rate, source | 2026-07-01 (**current snapshot**) | **88** | **Collected — CURRENT snapshot only**. 88 of 97 fiats/metals return a rate; plan caps convert to 8 ids/call. No bulk historical FX on this plan (see LEFT). |
+| 12 | `pro_api_dex_reference/cmc_dex_platforms.parquet` | `/v1/dex/platform/list` | `platform_id` | platform_id, name, short_name, platform_alias, chain_id, crypto_id, native_token_address, token/tx/address explorer URL formats, is_verified | reference table (no dates) | **116** | **Collected — reference only**. Token/pair/OHLCV DEX data is OUT OF SCOPE (see LEFT). |
+
+### Mapping every professor ask → the endpoint that satisfies it
+
+- **Historical listings incl. delisted coins (survivorship-free):** keyless
+  `data-api/v3/.../listings/historical` (§2.1, production, 2013→now) **plus** the new
+  `/v1/cryptocurrency/map` (#1) which enumerates all ~37k coins active+inactive with
+  stable `cmc_id` and `is_active` — e.g. Terra Classic (LUNC, id 4172) is present with
+  `is_active=false`.
+- **Daily quotes (price / market cap / volume):** `/v3/cryptocurrency/quotes/historical`
+  (§2.2, 36-month daily, already on disk: `cmc_quotes_history.parquet`).
+- **id ↔ symbol ↔ name ↔ slug map:** `/v1/cryptocurrency/map` (#1).
+- **USD / fiat exchange-rate reference:** `/v1/fiat/map` (#6) is the currency reference
+  (id/symbol/sign incl. metals). CMC has no keyed historical fiat-FX time series on this
+  plan; the fiat map is the reference table for USD-conversion/provenance work.
+- **Global market metrics:** `/v1/global-metrics/quotes/historical` (#2).
+- **CMC market index / sentiment:** `/v3/fear-and-greed/historical` (#3) and
+  `/v1/altcoin-season-index/historical` (#4).
+- **"The 100" (CMC100 index):** `/v3/index/cmc100-historical` (#8) — daily value +
+  constituent basket (id/symbol/weight), 2024-01-01 → now.
+- **"The 20" (CMC20 index):** `/v3/index/cmc20-historical` (#9) — daily value +
+  constituent basket incl. per-constituent priceUsd/units, 2024-01-01 → now.
+- **Exchange rate to USD:** `/v2/tools/price-conversion` (#11) gives the **current**
+  USD→fiat rate for every fiat/metal in the fiat map (`usd_to_fiat_rate`); the fiat map
+  (#6) is the id/symbol/sign reference.
+- **Airdrops:** `/v1/cryptocurrency/airdrops` (#10) — all ENDED/ONGOING/UPCOMING events.
+- **DEX network reference:** `/v1/dex/platform/list` (#12) — the on-chain platform table.
+
+### What is LEFT / plan-limited
+
+1. **Full multi-year daily OHLCV for all ~12k coins** — the `/v2/cryptocurrency/ohlcv/historical`
+   endpoint returns **HTTP 403 (code 1006, "plan doesn't support this endpoint")** on the
+   current key, so even the BTC/ETH/LUNC sample returns 0 rows (recorded in the manifest).
+   Full OHLCV backfill requires a plan upgrade; it would be a separate long run of ~12,000
+   coins × per-coin history, paced under the rate limit. Daily close/mcap/vol is already
+   covered by `quotes/historical` in the interim.
+2. **Global-metrics history before 2023-07-02** — capped at **36 months** on this plan
+   (degraded gracefully; achieved coverage recorded in the manifest).
+3. **Altcoin Season Index before 2026-04-03** — the endpoint only exposes **90 days**; no
+   deeper history is available from CMC for this index.
+4. **CMC100 / CMC20 index history before 2024-01-01** — regardless of `time_start`, the
+   index endpoints return no point earlier than **2024-01-01** on this plan, and `count` is
+   hard-capped at **10 points/call** (paged forward in 10-day windows to build the series).
+5. **Historical fiat FX (USD→fiat time series)** — **NOT available in bulk** on this plan.
+   `price-conversion` supports a `time` param but only one date per call and max **8 convert
+   ids/call**, so only a **current snapshot** is collected (#11). A full historical FX series
+   is a documented gap.
+6. **On-chain DEX token / pair / OHLCV data** — **OUT OF SCOPE** for this research. Only the
+   platform reference (#12) is collected; token/pair/liquidity/OHLCV DEX endpoints require
+   key entitlements / return 5xx on this plan.
+7. **Not available on this plan or out of scope (confirmed):** OHLCV,
+   `price-performance-stats`, `exchange/*` `listings-latest`, `market-pairs`, `trending`,
+   `listings/new`, `content`, `community`, `derivatives` (404), and on-chain DEX
+   token/pair data. **All time-series history is capped at 36 months.**
+
+### Reproduce / maintain
+
+```bash
+# one-off full (re)collection of a dataset
+python -c "from pathlib import Path; from src.cmc.client import CMCClient; \
+from src.cmc.collectors import map as m; m.run(CMCClient(), Path('cmc_complete/data/coinmarketcap_data'))"
+
+# idempotent monthly maintenance across all datasets (append newest only, no dupes)
+python -m src.cmc.maintain                       # all datasets, through today
+python -m src.cmc.maintain --datasets global_metrics fear_greed --month 2026-07
+```
+
+The maintenance job reads each manifest's `coverage_end`, fetches only newer data, and
+upserts by primary key (`keep="last"`), so a second run for the same month adds zero rows
+and changes no existing rows (proven by `tests/cmc/test_storage_idempotent.py`).

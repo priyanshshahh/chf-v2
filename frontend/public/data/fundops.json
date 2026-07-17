@@ -1,0 +1,401 @@
+{
+  "note": "Virtual paper trading operations. Simulated cash and simulated fees. Not live holdings, not financial advice. alpha_verified remains false.",
+  "reconciliation": {
+    "tolerance_bps": 1.0,
+    "generated_utc": "2026-07-07T00:15:51.806845+00:00",
+    "books": [
+      {
+        "book": "benchmark_btc",
+        "status": "OK",
+        "divergence_bps": 0.0,
+        "max_divergence_bps": 0.0,
+        "days_ok": 3,
+        "days_checked": 3,
+        "break_classification": null,
+        "date": "2026-07-07"
+      },
+      {
+        "book": "benchmark_btc_eth_5050",
+        "status": "OK",
+        "divergence_bps": 0.0,
+        "max_divergence_bps": 0.0,
+        "days_ok": 3,
+        "days_checked": 3,
+        "break_classification": null,
+        "date": "2026-07-07"
+      },
+      {
+        "book": "ridge_30d_top5",
+        "status": "OK",
+        "divergence_bps": 1.4665712114715713e-12,
+        "max_divergence_bps": 1.4665712114715713e-12,
+        "days_ok": 3,
+        "days_checked": 3,
+        "break_classification": null,
+        "date": "2026-07-07"
+      },
+      {
+        "book": "sleeve_defi_yield",
+        "status": "OK",
+        "divergence_bps": 0.0,
+        "max_divergence_bps": 0.0,
+        "days_ok": 2,
+        "days_checked": 2,
+        "break_classification": null,
+        "date": "2026-07-07"
+      },
+      {
+        "book": "sleeve_trend",
+        "status": "OK",
+        "divergence_bps": 1.4641097563255586e-12,
+        "max_divergence_bps": 1.4641097563255586e-12,
+        "days_ok": 2,
+        "days_checked": 2,
+        "break_classification": null,
+        "date": "2026-07-07"
+      }
+    ]
+  },
+  "risk_audits": [
+    {
+      "book": "ridge_30d_top5",
+      "as_of": "2026-07-06",
+      "final_gross_exposure": 0.27167521613487905,
+      "final_cash_weight": 0.728324783865121,
+      "n_final_positions": 6,
+      "vol_target_multiplier": 0.42624032243799365,
+      "drawdown_multiplier": 1.0,
+      "combined_multiplier": 0.42624032243799365,
+      "forecast_vol_annual": 0.3519141482017364,
+      "drawdown_state": "NORMAL"
+    }
+  ],
+  "drawdown_states": [
+    {
+      "book": "ridge_30d_top5",
+      "state": "NORMAL",
+      "state_entered_date": "2026-07-05",
+      "last_date": "2026-07-06",
+      "last_nav": 99685.14197426813,
+      "peak_nav": 99800.8000002,
+      "drawdown": -0.0011588887657377756
+    }
+  ],
+  "regime": {
+    "date": "2026-07-04",
+    "regime": "risk_off",
+    "btc_trend_up": false,
+    "breadth_pct_above_50d_ma": 0.1902654867256637,
+    "avg_pairwise_corr_60d_top20": 0.5082843396240524,
+    "btc_dominance_trend": "falling",
+    "fear_greed_value": 16.0,
+    "fear_greed_bucket": "extreme_fear",
+    "days_in_regime": 34
+  },
+  "sleeve_allocation": {
+    "as_of": "2026-07-04",
+    "regime": "risk_off",
+    "cash_weight": 0.36754448322147115,
+    "artifact_type": "PROPOSAL",
+    "approved": false,
+    "note": "Sleeve capital allocation proposal. Never auto-executed: promotion goes through the orchestration approval gate (humans own capital allocation).",
+    "sleeves": [
+      {
+        "sleeve": "sleeve_carry",
+        "base_weight": 0.05648031175578795,
+        "proposed_weight": 0.05648031175578795,
+        "sortino_90d": 0.0,
+        "return_source": "backtest_fallback"
+      },
+      {
+        "sleeve": "sleeve_carry_neutral",
+        "base_weight": 0.05648031175578795,
+        "proposed_weight": 0.05648031175578795,
+        "sortino_90d": 0.0,
+        "return_source": "backtest_fallback"
+      },
+      {
+        "sleeve": "sleeve_defi_yield",
+        "base_weight": 0.23130502834277794,
+        "proposed_weight": 0.23130502834277794,
+        "sortino_90d": 0.40953213810664635,
+        "return_source": "backtest_fallback"
+      },
+      {
+        "sleeve": "sleeve_statarb",
+        "base_weight": 0.14277372463407031,
+        "proposed_weight": 0.14277372463407031,
+        "sortino_90d": 0.25278494433848314,
+        "return_source": "backtest_fallback"
+      },
+      {
+        "sleeve": "sleeve_technical",
+        "base_weight": 0.4,
+        "proposed_weight": 0.12,
+        "sortino_90d": 2.0781520461998393,
+        "return_source": "backtest_fallback"
+      },
+      {
+        "sleeve": "sleeve_trend",
+        "base_weight": 0.05648031175578795,
+        "proposed_weight": 0.016944093526736384,
+        "sortino_90d": -2.1966297667607835,
+        "return_source": "backtest_fallback"
+      },
+      {
+        "sleeve": "sleeve_xsmom",
+        "base_weight": 0.05648031175578795,
+        "proposed_weight": 0.008472046763368192,
+        "sortino_90d": -0.373506426327436,
+        "return_source": "backtest_fallback"
+      }
+    ]
+  },
+  "monitoring": {
+    "modules": [
+      {
+        "module": "data_quality",
+        "status": "warn",
+        "n_alerts": 0,
+        "generated_utc": "2026-07-07T00:15:52.675107+00:00"
+      },
+      {
+        "module": "signal_health",
+        "status": "alert",
+        "n_alerts": 4,
+        "generated_utc": "2026-07-07T00:15:57.213800+00:00"
+      },
+      {
+        "module": "execution_quality",
+        "status": "ok",
+        "n_alerts": 0,
+        "generated_utc": "2026-07-07T00:15:57.282697+00:00"
+      },
+      {
+        "module": "model_decay",
+        "status": "insufficient_data",
+        "n_alerts": 0,
+        "generated_utc": "2026-07-07T00:15:57.296179+00:00"
+      },
+      {
+        "module": "risk_report",
+        "status": "alert",
+        "n_alerts": 1,
+        "generated_utc": "2026-07-07T00:15:57.453015+00:00"
+      },
+      {
+        "module": "shadow_nav",
+        "status": "alert",
+        "n_alerts": 3,
+        "generated_utc": "2026-07-07T00:15:57.517952+00:00"
+      },
+      {
+        "module": "watchdog",
+        "status": "alert",
+        "n_alerts": 5,
+        "generated_utc": "2026-07-07T00:15:57.718773+00:00"
+      },
+      {
+        "module": "champion_challenger",
+        "status": "ok",
+        "n_alerts": 0,
+        "generated_utc": "2026-07-07T00:15:57.748818+00:00"
+      }
+    ],
+    "alerts": [
+      {
+        "module": "signal_health",
+        "message": "baseline_cross_sectional_mean: IC sign flip vs backtest-period IC in 2 combo(s)",
+        "severity": "alert"
+      },
+      {
+        "module": "signal_health",
+        "message": "lightgbm: IC sign flip vs backtest-period IC in 4 combo(s)",
+        "severity": "alert"
+      },
+      {
+        "module": "signal_health",
+        "message": "linear_ridge: IC sign flip vs backtest-period IC in 1 combo(s)",
+        "severity": "alert"
+      },
+      {
+        "module": "signal_health",
+        "message": "random_forest: IC sign flip vs backtest-period IC in 2 combo(s)",
+        "severity": "alert"
+      },
+      {
+        "module": "risk_report",
+        "message": "sleeve_defi_yield: top position SOL weight 77.8% exceeds limit",
+        "severity": "alert"
+      },
+      {
+        "module": "shadow_nav",
+        "message": "benchmark_btc: shadow NAV diverges -142.8 bps (>|10.0|)",
+        "severity": "alert"
+      },
+      {
+        "module": "shadow_nav",
+        "message": "benchmark_btc_eth_5050: shadow NAV diverges -123.2 bps (>|10.0|)",
+        "severity": "alert"
+      },
+      {
+        "module": "shadow_nav",
+        "message": "sleeve_trend: shadow NAV diverges +68.2 bps (>|10.0|)",
+        "severity": "alert"
+      },
+      {
+        "module": "watchdog",
+        "message": "stage 'market' output is stale or missing for its cadence",
+        "severity": "alert"
+      },
+      {
+        "module": "watchdog",
+        "message": "stage 'onchain' output is stale or missing for its cadence",
+        "severity": "alert"
+      },
+      {
+        "module": "watchdog",
+        "message": "stage 'features' output is stale or missing for its cadence",
+        "severity": "alert"
+      },
+      {
+        "module": "watchdog",
+        "message": "stage 'labels' output is stale or missing for its cadence",
+        "severity": "alert"
+      },
+      {
+        "module": "watchdog",
+        "message": "stage 'portfolio' output is stale or missing for its cadence",
+        "severity": "alert"
+      }
+    ],
+    "daily_quality_verdict": "warn"
+  },
+  "nav": [
+    {
+      "book": "benchmark_btc",
+      "latest": {
+        "date": "2026-07-07",
+        "gross": 100941.9729370886,
+        "net": 100925.4878914372,
+        "mgmt_fee_cum": 16.48504565141687,
+        "perf_fee_cum": 0.0
+      },
+      "points": [
+        {
+          "date": "2026-07-05",
+          "gross": 99800.8,
+          "net": 99795.33
+        },
+        {
+          "date": "2026-07-06",
+          "gross": 100109.31,
+          "net": 100098.36
+        },
+        {
+          "date": "2026-07-07",
+          "gross": 100941.97,
+          "net": 100925.49
+        }
+      ]
+    },
+    {
+      "book": "benchmark_btc_eth_5050",
+      "latest": {
+        "date": "2026-07-07",
+        "gross": 100490.49400661659,
+        "net": 100474.05844515235,
+        "mgmt_fee_cum": 16.435561464243477,
+        "perf_fee_cum": 0.0
+      },
+      "points": [
+        {
+          "date": "2026-07-05",
+          "gross": 99800.8,
+          "net": 99795.33
+        },
+        {
+          "date": "2026-07-06",
+          "gross": 99657.7,
+          "net": 99646.77
+        },
+        {
+          "date": "2026-07-07",
+          "gross": 100490.49,
+          "net": 100474.06
+        }
+      ]
+    },
+    {
+      "book": "ridge_30d_top5",
+      "latest": {
+        "date": "2026-07-07",
+        "gross": 99224.06163806614,
+        "net": 99207.69396663531,
+        "mgmt_fee_cum": 16.367671430823794,
+        "perf_fee_cum": 0.0
+      },
+      "points": [
+        {
+          "date": "2026-07-05",
+          "gross": 99800.8,
+          "net": 99795.33
+        },
+        {
+          "date": "2026-07-06",
+          "gross": 99685.14,
+          "net": 99674.21
+        },
+        {
+          "date": "2026-07-07",
+          "gross": 99224.06,
+          "net": 99207.69
+        }
+      ]
+    },
+    {
+      "book": "sleeve_defi_yield",
+      "latest": {
+        "date": "2026-07-07",
+        "gross": 99995.22514378032,
+        "net": 99984.2763643204,
+        "mgmt_fee_cum": 10.948779459933169,
+        "perf_fee_cum": 0.0
+      },
+      "points": [
+        {
+          "date": "2026-07-06",
+          "gross": 99820.0,
+          "net": 99814.53
+        },
+        {
+          "date": "2026-07-07",
+          "gross": 99995.23,
+          "net": 99984.28
+        }
+      ]
+    },
+    {
+      "book": "sleeve_trend",
+      "latest": {
+        "date": "2026-07-07",
+        "gross": 99390.87671191705,
+        "net": 99379.95775976845,
+        "mgmt_fee_cum": 10.918952148598194,
+        "perf_fee_cum": 0.0
+      },
+      "points": [
+        {
+          "date": "2026-07-06",
+          "gross": 99880.0,
+          "net": 99874.53
+        },
+        {
+          "date": "2026-07-07",
+          "gross": 99390.88,
+          "net": 99379.96
+        }
+      ]
+    }
+  ]
+}

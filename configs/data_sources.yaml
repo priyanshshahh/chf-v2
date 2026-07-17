@@ -1,0 +1,128 @@
+# data_sources.yaml — configuration for CHF's keyless data-breadth collectors.
+#
+# Each collector under providers/ reads its own section here for endpoints,
+# symbol lists, output paths and rate-limit seconds. All sources are keyless
+# except coinglass, which activates only when COINGLASS_API_KEY is exported.
+#
+# NOTE: this file is intentionally separate from configs/run_config.yaml — the
+# data-breadth layer (derivatives, DeFi, macro) is orthogonal to the trading
+# run config and is scheduled independently by jobs/scheduler.py.
+
+# ---------------------------------------------------------------------------
+# 1. OKX public derivatives (open interest, funding history, long/short ratio)
+# ---------------------------------------------------------------------------
+derivatives_okx:
+  base_url: "https://www.okx.com"
+  output_path: "data/external/derivatives_okx.parquet"
+  rate_limit_seconds: 1.0
+  request_timeout_seconds: 30
+  # base asset -> USDT-margined swap instrument id
+  instruments:
+    BTC: "BTC-USDT-SWAP"
+    ETH: "ETH-USDT-SWAP"
+    SOL: "SOL-USDT-SWAP"
+    XRP: "XRP-USDT-SWAP"
+    DOGE: "DOGE-USDT-SWAP"
+  # long/short account ratio is keyed by currency, not instrument
+  ratio_period: "1H"
+  funding_history_pages: 3   # 100 events/page, backward from now
+  endpoints:
+    open_interest: "/api/v5/public/open-interest"
+    funding_rate_history: "/api/v5/public/funding-rate-history"
+    long_short_ratio: "/api/v5/rubik/stat/contracts/long-short-account-ratio"
+
+# ---------------------------------------------------------------------------
+# 2. Bybit v5 public derivatives (funding history, open interest, tickers)
+# ---------------------------------------------------------------------------
+derivatives_bybit:
+  base_url: "https://api.bybit.com"
+  output_path: "data/external/derivatives_bybit.parquet"
+  rate_limit_seconds: 1.0
+  request_timeout_seconds: 30
+  category: "linear"
+  oi_interval: "1h"
+  # base asset -> linear perpetual symbol
+  symbols:
+    BTC: "BTCUSDT"
+    ETH: "ETHUSDT"
+    SOL: "SOLUSDT"
+    XRP: "XRPUSDT"
+    DOGE: "DOGEUSDT"
+  endpoints:
+    funding_history: "/v5/market/funding/history"
+    open_interest: "/v5/market/open-interest"
+    tickers: "/v5/market/tickers"
+  # Binance USD-M futures is geo-blocked from this host (HTTP 451) and is
+  # deliberately NOT collected here; OKX + Bybit provide redundant coverage.
+
+# ---------------------------------------------------------------------------
+# 3. DeFiLlama (fully keyless): protocol TVL, yields, chain TVL, stablecoins
+# ---------------------------------------------------------------------------
+defillama:
+  base_url: "https://api.llama.fi"
+  yields_url: "https://yields.llama.fi"
+  stablecoins_url: "https://stablecoins.llama.fi"
+  output_dir: "data/external/defillama"
+  rate_limit_seconds: 1.0
+  request_timeout_seconds: 30
+  # protocol slugs for TVL time series (data/external/defillama/tvl.parquet)
+  protocols:
+    - "uniswap"
+    - "aave"
+    - "lido"
+    - "makerdao"
+    - "curve-dex"
+    - "pancakeswap"
+    - "raydium"
+    - "jupiter-aggregator"
+  # chain TVL time series (data/external/defillama/chains.parquet)
+  chains:
+    - "Ethereum"
+    - "Solana"
+    - "Bitcoin"
+    - "BSC"
+    - "Arbitrum"
+    - "Base"
+  # top-N pools by TVL kept from /pools (data/external/defillama/yields.parquet)
+  yields_top_n: 200
+  # stablecoins circulating snapshot (data/external/defillama/stablecoins.parquet)
+  stablecoins_top_n: 50
+  endpoints:
+    protocol_tvl: "/protocol/{slug}"
+    chain_tvl: "/v2/historicalChainTvl/{chain}"
+    pools: "/pools"
+    stablecoins: "/stablecoins?includePrices=false"
+
+# ---------------------------------------------------------------------------
+# 4. FRED public CSV (fredgraph.csv?id=<SERIES>) — no key required
+# ---------------------------------------------------------------------------
+macro_fred:
+  base_url: "https://fred.stlouisfed.org/graph/fredgraph.csv"
+  output_path: "data/external/macro_fred.parquet"
+  rate_limit_seconds: 1.0
+  request_timeout_seconds: 30
+  # series id -> human description (a 404 on any series is skipped, not fatal)
+  series:
+    DTWEXBGS: "Nominal Broad USD Index (DXY proxy)"
+    DGS2: "2-Year Treasury Constant Maturity Yield"
+    DGS10: "10-Year Treasury Constant Maturity Yield"
+    VIXCLS: "CBOE Volatility Index (VIX)"
+    T10Y2Y: "10Y-2Y Treasury Spread (yield-curve slope)"
+    WM2NS: "M2 Money Stock (weekly)"
+
+# ---------------------------------------------------------------------------
+# 5. Coinglass (liquidations + aggregated funding) — needs COINGLASS_API_KEY
+# ---------------------------------------------------------------------------
+derivatives_coinglass:
+  base_url: "https://open-api-v3.coinglass.com"
+  output_path: "data/external/liquidations.parquet"
+  rate_limit_seconds: 1.0
+  request_timeout_seconds: 30
+  api_key_env: "COINGLASS_API_KEY"
+  symbols:
+    - "BTC"
+    - "ETH"
+    - "SOL"
+  endpoints:
+    liquidation_history: "/api/futures/liquidation/history"
+    funding_aggregated: "/api/futures/funding-rate/oi-weight-history"

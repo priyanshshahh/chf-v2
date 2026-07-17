@@ -11,6 +11,7 @@ authentication before any public deployment.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -25,9 +26,13 @@ DOCS = ROOT / "docs"
 DATA = ROOT / "data"
 LOG_DIR = ROOT / "logs" / "dashboard_runs"
 
+# Read-only demo mode (set by streamlit_app.py for cloud deployments): the
+# Pipeline Control Center is display-only and command execution is refused.
+READ_ONLY = os.environ.get("CHF_DASHBOARD_READ_ONLY", "").strip().lower() in {"1", "true", "yes"}
+
 RELEASE_TAG = "v1.0-research-release"
 FINAL_RESULT = "No verified alpha found under tested configurations."
-BENCHMARK_WINDOW = ("2022-12-15", "2026-03-24")
+PIPELINE_HINT = "Run the pipeline to generate results (e.g. `bash run_all.sh` or `python3 main.py backtest`)."
 
 PIPELINE = [
     {
@@ -107,42 +112,103 @@ PIPELINE = [
 FULL_PIPELINE_COMMAND = ["bash", "run_all.sh"]
 SCHEDULER_COMMAND = ["python3", "main.py", "schedule", "--config", "configs/run_config.yaml"]
 
-BENCHMARK_ROWS = [
-    {"Benchmark": "BTC", "Total Return": "305.50%"},
-    {"Benchmark": "ETH", "Total Return": "69.85%"},
-    {"Benchmark": "BTC/ETH 50-50", "Total Return": "178.04%"},
-    {"Benchmark": "Equal-weight universe", "Total Return": "30.39%"},
-]
+def load_json_file(path: Path) -> Any:
+    """Read a JSON artifact, returning None instead of crashing when absent."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
-CANDIDATE_ROWS = [
-    {
-        "Candidate": "lightgbm / market_only / raw_forward_return / 14d",
-        "Best Strategy": "top_20_vol_scaled",
-        "Return": "45.39%",
-        "CAGR": "12.10%",
-        "Sharpe": "0.5030",
-        "Max DD": "-71.45%",
-        "Alpha Verified": "false",
-    },
-    {
-        "Candidate": "linear_ridge / market_only / raw_forward_return / 30d",
-        "Best Strategy": "top_5_equal_weight",
-        "Return": "147.36%",
-        "CAGR": "31.84%",
-        "Sharpe": "0.7521",
-        "Max DD": "-59.40%",
-        "Alpha Verified": "false",
-    },
-    {
-        "Candidate": "random_forest / market_only / raw_forward_return / 14d",
-        "Best Strategy": "top_5_equal_weight",
-        "Return": "-30.40%",
-        "CAGR": "-10.47%",
-        "Sharpe": "0.2288",
-        "Max DD": "-86.86%",
-        "Alpha Verified": "false",
-    },
-]
+
+def load_parquet_file(path: Path) -> pd.DataFrame | None:
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        return None
+
+
+def fmt_pct(x: Any, digits: int = 2) -> str:
+    try:
+        return f"{float(x) * 100:.{digits}f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def fmt_num(x: Any, digits: int = 4) -> str:
+    try:
+        return f"{float(x):.{digits}f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def canonical_results() -> dict[str, Any]:
+    """Canonical results read from data files at render time (never hardcoded)."""
+    return {
+        "summary": load_json_file(DATA / "backtests" / "backtest_summary.json"),
+        "manifest": load_json_file(DATA / "backtests" / "backtest_manifest.json"),
+        "alpha": load_json_file(DATA / "backtests" / "alpha_report.json"),
+        "allocation": load_json_file(DATA / "allocations" / "allocation_manifest.json"),
+    }
+
+
+def canonical_window(results: dict[str, Any]) -> tuple[str, str] | None:
+    rows = results.get("summary") or []
+    if not isinstance(rows, list) or not rows:
+        return None
+    starts = [r.get("start_date", "")[:10] for r in rows if r.get("start_date")]
+    ends = [r.get("end_date", "")[:10] for r in rows if r.get("end_date")]
+    if not starts or not ends:
+        return None
+    return min(starts), max(ends)
+
+
+def strategy_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Strategy": r.get("strategy_name"),
+                "Total Return": fmt_pct(r.get("total_return")),
+                "CAGR": fmt_pct(r.get("cagr")),
+                "Sharpe": fmt_num(r.get("sharpe")),
+                "Max DD": fmt_pct(r.get("max_drawdown")),
+                "Turnover (ann.)": fmt_num(r.get("annualized_turnover"), 2),
+            }
+            for r in rows
+        ]
+    )
+
+
+def benchmark_frame(results: dict[str, Any]) -> pd.DataFrame | None:
+    alpha = results.get("alpha") or {}
+    rows = alpha.get("benchmark_rows")
+    if not rows:
+        bench = load_parquet_file(DATA / "backtests" / "benchmark_summary.parquet")
+        if bench is None or bench.empty:
+            return None
+        rows = bench.to_dict("records")
+    return pd.DataFrame(
+        [
+            {
+                "Benchmark": r.get("strategy_name"),
+                "Total Return": fmt_pct(r.get("total_return")),
+                "Sharpe": fmt_num(r.get("sharpe")),
+                "Max DD": fmt_pct(r.get("max_drawdown")),
+            }
+            for r in rows
+        ]
+    )
+
+
+def candidate_studies() -> list[tuple[str, pd.DataFrame]]:
+    """Legacy per-candidate backtests (frozen May 2026 study), if present."""
+    studies = []
+    for d in sorted(DATA.glob("backtests_candidate_*")):
+        rows = load_json_file(d / "backtest_summary.json")
+        if not isinstance(rows, list) or not rows:
+            continue
+        name = d.name.replace("backtests_candidate_", "")
+        studies.append((name, strategy_frame(rows)))
+    return studies
 
 DOCS_TO_SHOW = {
     "README": ROOT / "README.md",
@@ -195,6 +261,10 @@ def file_status(paths: list[str]) -> tuple[str, str]:
 
 
 def run_command(command: list[str], label: str) -> dict[str, Any]:
+    if READ_ONLY:
+        st.error("Read-only demo deployment: command execution is disabled.")
+        return {"label": label, "command": " ".join(command), "returncode": -1,
+                "stdout": "", "stderr": "disabled in read-only mode", "log_path": ""}
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_label = label.lower().replace(" ", "_").replace("/", "_")
@@ -289,6 +359,8 @@ with st.sidebar:
             "Pipeline Control Center",
             "Scheduler / Automation",
             "Results Explorer",
+            "Paper Trading",
+            "Fund Operations",
             "Project Explorer",
             "Architecture / Methodology",
             "Reproducibility",
@@ -306,12 +378,26 @@ st.caption("Local demo and operations UI for the frozen research release.")
 
 if page == "Home / Executive Summary":
     st.header("Home / Executive Summary")
+    results = canonical_results()
+    manifest = results.get("manifest") or {}
+    alpha = results.get("alpha") or {}
+    allocation = results.get("allocation") or {}
+    summary_rows = results.get("summary") or []
+    window = canonical_window(results)
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Alpha verified", "false")
-    c2.metric("Candidates tested", "3")
-    c3.metric("Benchmark window", "2022-12-15 → 2026-03-24")
+    if manifest:
+        c1.metric("Alpha verified", str(manifest.get("alpha_verified", "unknown")).lower())
+    else:
+        c1.metric("Alpha verified", "n/a")
+    c2.metric("Strategies backtested", str(len(summary_rows)) if summary_rows else "n/a")
+    c3.metric("Backtest window", f"{window[0]} → {window[1]}" if window else "n/a")
     c4.metric("Release", RELEASE_TAG)
-    st.success(FINAL_RESULT)
+
+    if not manifest and not summary_rows:
+        st.info(f"No backtest artifacts found. {PIPELINE_HINT}")
+    else:
+        st.success(FINAL_RESULT if not manifest.get("alpha_verified") else "See backtest manifest for the current alpha verdict.")
     st.warning("Research and education only. Not financial advice. No live trading or investment recommendation is implied.")
     st.markdown(
         """
@@ -321,12 +407,30 @@ leakage-safe validation, deterministic portfolio construction, transaction
 costs, benchmark sanity checks, and out-of-sample backtesting.
 """
     )
-    st.dataframe(pd.DataFrame(CANDIDATE_ROWS), use_container_width=True, hide_index=True)
+    if allocation:
+        st.caption(
+            "Selected model: "
+            f"`{allocation.get('selected_model_name', 'n/a')}` · horizon "
+            f"`{allocation.get('selected_horizon_days', 'n/a')}d` · features "
+            f"`{allocation.get('selected_feature_set', 'n/a')}`"
+        )
+    if alpha.get("best_strategy_by_sharpe"):
+        st.caption(f"Best strategy by Sharpe (still not verified alpha): `{alpha['best_strategy_by_sharpe']}`")
+    if summary_rows:
+        st.subheader("Canonical strategy results (net of costs)")
+        st.dataframe(strategy_frame(summary_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info(f"Strategy results unavailable. {PIPELINE_HINT}")
 
 elif page == "Pipeline Control Center":
     st.header("Pipeline Control Center")
-    st.warning("Running commands may update local generated outputs under `data/`. Nothing runs automatically.")
-    confirm = st.checkbox("I understand these buttons execute local pipeline commands and may update local outputs.")
+    if READ_ONLY:
+        st.info("Read-only demo deployment: pipeline command execution is disabled. "
+                "The table below documents the pipeline stages.")
+        confirm = False
+    else:
+        st.warning("Running commands may update local generated outputs under `data/`. Nothing runs automatically.")
+        confirm = st.checkbox("I understand these buttons execute local pipeline commands and may update local outputs.")
 
     rows = []
     for item in PIPELINE:
@@ -401,15 +505,41 @@ elif page == "Scheduler / Automation":
 
 elif page == "Results Explorer":
     st.header("Results Explorer")
+    results = canonical_results()
+    summary_rows = results.get("summary") or []
+    window = canonical_window(results)
     st.success(FINAL_RESULT)
     left, right = st.columns(2)
     with left:
-        st.subheader("Candidate Results")
-        st.dataframe(pd.DataFrame(CANDIDATE_ROWS), use_container_width=True, hide_index=True)
+        st.subheader("Canonical Strategy Results")
+        if summary_rows:
+            if window:
+                st.write(f"Window: `{window[0]}` to `{window[1]}`")
+            st.dataframe(strategy_frame(summary_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No canonical backtest summary found. {PIPELINE_HINT}")
     with right:
         st.subheader("Benchmarks")
-        st.write(f"Window: `{BENCHMARK_WINDOW[0]}` to `{BENCHMARK_WINDOW[1]}`")
-        st.dataframe(pd.DataFrame(BENCHMARK_ROWS), use_container_width=True, hide_index=True)
+        bench = benchmark_frame(results)
+        if bench is not None and not bench.empty:
+            st.dataframe(bench, use_container_width=True, hide_index=True)
+            st.caption(
+                "Benchmarks are computed by the BacktestAgent for the same window and cost convention. "
+                "A 0.00% benchmark indicates a flat placeholder series (prices not loaded for that run)."
+            )
+        else:
+            st.info(f"No benchmark summary found. {PIPELINE_HINT}")
+
+    studies = candidate_studies()
+    if studies:
+        st.subheader("Frozen May 2026 candidate study (legacy)")
+        st.caption(
+            "Per-candidate backtests from the frozen May 2026 study — kept for provenance. "
+            "The canonical, current results are the tables above."
+        )
+        for name, frame in studies:
+            with st.expander(f"Candidate: {name}"):
+                st.dataframe(frame, use_container_width=True, hide_index=True)
 
     equity_files = sorted(DATA.glob("backtests_candidate_*/equity_curves.parquet"))
     if equity_files:
@@ -430,6 +560,282 @@ elif page == "Results Explorer":
 
     doc = st.selectbox("Open result report", list(DOCS_TO_SHOW.keys()))
     render_safe_file(DOCS_TO_SHOW[doc])
+
+elif page == "Paper Trading":
+    st.header("Paper Trading (Virtual)")
+    st.warning(
+        "Virtual paper trading — research validation with simulated cash. "
+        "Not financial advice. Not live holdings. No verified alpha is implied."
+    )
+    pt_manifest = load_json_file(DATA / "papertrade" / "papertrade_manifest.json")
+    if not pt_manifest:
+        st.info("No paper trading data yet — run: `python3 main.py papertrade`")
+    else:
+        books = pt_manifest.get("books") or {}
+        ok_books = {n: b for n, b in books.items() if b.get("status") == "ok"}
+        combined_nav = sum(b.get("nav") or 0.0 for b in ok_books.values())
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Books (ok / total)", f"{len(ok_books)} / {len(books)}")
+        c2.metric("Combined virtual NAV (ok books)", f"${combined_nav:,.0f}")
+        c3.metric("Last run (UTC)", str(pt_manifest.get("last_run_utc", "n/a"))[:16].replace("T", " "))
+        st.caption(f"As of: `{pt_manifest.get('as_of', 'n/a')}` · books update via `python3 main.py papertrade`")
+
+        for name, info in books.items():
+            status = info.get("status", "unknown")
+            title = f"{name} — {status.upper()}"
+            with st.expander(title, expanded=(status == "ok")):
+                if status != "ok":
+                    st.error(f"Book skipped this run. Reason: `{info.get('skip_reason') or 'unknown'}`")
+                book_dir = DATA / "papertrade" / name
+                state = load_json_file(book_dir / "state.json") or {}
+                c1, c2, c3 = st.columns(3)
+                nav = info.get("nav")
+                c1.metric("Virtual NAV", f"${nav:,.0f}" if isinstance(nav, (int, float)) else "n/a")
+                c2.metric("Virtual cash", f"${state.get('cash'):,.0f}" if isinstance(state.get("cash"), (int, float)) else "n/a")
+                c3.metric("Last rebalance", str(state.get("last_rebalance") or "n/a"))
+
+                equity = load_parquet_file(book_dir / "equity.parquet")
+                if equity is not None and not equity.empty and {"date", "nav"}.issubset(equity.columns):
+                    cum = equity.sort_values("date")["cum_return"].iloc[-1] if "cum_return" in equity.columns else None
+                    if cum is not None and pd.notna(cum):
+                        st.caption(f"Cumulative return: `{fmt_pct(cum)}` over {len(equity)} day(s)")
+                    if len(equity) > 1:
+                        st.line_chart(equity.sort_values("date"), x="date", y="nav")
+                    else:
+                        st.caption("Collecting history — the equity chart appears once the book has more than one daily NAV point.")
+                else:
+                    st.caption("No equity history recorded for this book yet.")
+
+                positions = state.get("positions") or {}
+                if positions:
+                    st.write("Positions")
+                    st.dataframe(
+                        pd.DataFrame([{"Symbol": s, "Quantity": q} for s, q in positions.items()]),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("No open virtual positions.")
+
+                fills = load_parquet_file(book_dir / "fills.parquet")
+                if fills is not None and not fills.empty:
+                    st.write("Recent fills (last 50)")
+                    st.dataframe(fills.sort_values("date").tail(50), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No fills recorded yet.")
+
+    st.subheader("Scheduler status")
+    sched_dir = ROOT / "logs" / "scheduler"
+    entries = sorted(sched_dir.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True) if sched_dir.exists() else []
+    if entries:
+        newest = entries[0]
+        newest_ts = datetime.fromtimestamp(newest.stat().st_mtime, tz=timezone.utc)
+        st.write(f"Latest scheduler log: `{rel(newest)}` (modified {newest_ts.strftime('%Y-%m-%d %H:%M UTC')})")
+    else:
+        st.info("No scheduler logs found under `logs/scheduler/` — the scheduler has not run recently on this machine.")
+    st.caption(
+        "Configured schedule (jobs/scheduler.py): paper trading runs daily at 13:00 UTC "
+        "(cron `0 13 * * *`) via `python3 main.py papertrade`. Start locally with "
+        "`python3 main.py schedule --config configs/run_config.yaml`."
+    )
+
+elif page == "Fund Operations":
+    st.header("Fund Operations (Virtual)")
+    st.warning(
+        "Institutional fund-operations layers applied to VIRTUAL paper books: "
+        "simulated cash and simulated fees. Not live holdings. Not financial advice. "
+        "The research verdict remains `alpha_verified=false`."
+    )
+
+    # ---- Dual-book reconciliation -------------------------------------------------
+    st.subheader("Dual-book reconciliation")
+    rec = load_json_file(DATA / "accounting" / "reconciliation_report.json")
+    if not rec:
+        st.info("No reconciliation report yet — run `python3 main.py nav`.")
+    else:
+        meta = rec.get("_meta") or {}
+        book_rows = [
+            {
+                "Book": name,
+                "Status": r.get("status"),
+                "Divergence (bps)": fmt_num(r.get("divergence_bps"), 4),
+                "Max divergence (bps)": fmt_num(r.get("max_divergence_bps"), 4),
+                "Days OK": f"{r.get('days_ok', '—')}/{r.get('days_checked', '—')}",
+                "Break class": r.get("break_classification") or "—",
+            }
+            for name, r in sorted(rec.items())
+            if name != "_meta" and isinstance(r, dict)
+        ]
+        n_ok = sum(1 for r in book_rows if r["Status"] == "OK")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Books reconciled OK", f"{n_ok} / {len(book_rows)}")
+        c2.metric("Tolerance (bps)", fmt_num(meta.get("tolerance_bps"), 1))
+        c3.metric("Report generated (UTC)", str(meta.get("generated_utc", "n/a"))[:16].replace("T", " "))
+        st.dataframe(pd.DataFrame(book_rows), use_container_width=True, hide_index=True)
+
+    # ---- Net-of-fees NAV ----------------------------------------------------------
+    st.subheader("Independent NAV — gross vs net of fees")
+    nav_files = sorted((DATA / "accounting").glob("nav_*.parquet")) if (DATA / "accounting").exists() else []
+    if not nav_files:
+        st.info("No accounting NAV series yet — run `python3 main.py nav`.")
+    else:
+        nav_rows = []
+        for p in nav_files:
+            nav = load_parquet_file(p)
+            if nav is None or nav.empty or "nav" not in nav.columns:
+                continue
+            nav = nav.sort_values("date")
+            last = nav.iloc[-1]
+            nav_rows.append(
+                {
+                    "Book": p.stem.replace("nav_", ""),
+                    "As of": str(last.get("date"))[:10],
+                    "Gross NAV": f"${float(last['nav']):,.2f}",
+                    "Net NAV": f"${float(last['net_nav']):,.2f}" if "net_nav" in nav.columns else "—",
+                    "Mgmt fees (cum)": f"${float(last['mgmt_fee_cum']):,.2f}" if "mgmt_fee_cum" in nav.columns else "—",
+                    "Perf fees (cum)": f"${float(last['perf_fee_cum']):,.2f}" if "perf_fee_cum" in nav.columns else "—",
+                    "Days": len(nav),
+                }
+            )
+        if nav_rows:
+            st.dataframe(pd.DataFrame(nav_rows), use_container_width=True, hide_index=True)
+            st.caption("Simulated 2%/20% fee schedule from `configs/accounting.yaml`, applied to virtual NAVs for realism only.")
+        else:
+            st.info("Accounting NAV files exist but could not be read.")
+
+    # ---- Risk governance ----------------------------------------------------------
+    st.subheader("Risk governance")
+    risk_dir = DATA / "risk"
+    audit_files = sorted(risk_dir.glob("risk_audit_*.json")) if risk_dir.exists() else []
+    dd_files = sorted(risk_dir.glob("drawdown_state_*.json")) if risk_dir.exists() else []
+    if not audit_files and not dd_files:
+        st.info("No risk pipeline artifacts yet under `data/risk/`.")
+    else:
+        left, right = st.columns(2)
+        with left:
+            st.write("Latest risk audits")
+            audit_rows = []
+            for p in audit_files:
+                a = load_json_file(p) or {}
+                mult = a.get("multipliers") or {}
+                audit_rows.append(
+                    {
+                        "Book": a.get("book") or p.stem.replace("risk_audit_", ""),
+                        "As of": a.get("as_of", "—"),
+                        "Vol-target mult": fmt_num(mult.get("vol_target"), 3),
+                        "Drawdown mult": fmt_num(mult.get("drawdown"), 3),
+                        "Final gross": fmt_pct(a.get("final_gross_exposure")),
+                        "Cash": fmt_pct(a.get("final_cash_weight")),
+                        "Positions": len(a.get("final_weights") or {}),
+                    }
+                )
+            if audit_rows:
+                st.dataframe(pd.DataFrame(audit_rows), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No risk audit files.")
+        with right:
+            st.write("Drawdown states")
+            dd_rows = []
+            for p in dd_files:
+                d = load_json_file(p) or {}
+                last_nav, peak_nav = d.get("last_nav"), d.get("peak_nav")
+                dd = (float(last_nav) / float(peak_nav) - 1.0) if last_nav and peak_nav else None
+                dd_rows.append(
+                    {
+                        "Book": p.stem.replace("drawdown_state_", ""),
+                        "State": d.get("state", "—"),
+                        "Since": d.get("state_entered_date", "—"),
+                        "Drawdown": fmt_pct(dd) if dd is not None else "—",
+                    }
+                )
+            if dd_rows:
+                st.dataframe(pd.DataFrame(dd_rows), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No drawdown state files.")
+
+    # ---- Regime & sleeves ---------------------------------------------------------
+    st.subheader("Regime & sleeve allocation")
+    regime = load_json_file(DATA / "strategies" / "regime_latest.json")
+    if regime:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Regime", str(regime.get("regime", "n/a")))
+        c2.metric("As of", str(regime.get("date", "n/a")))
+        c3.metric("BTC trend", "up" if regime.get("btc_trend_up") else "down")
+        fg = regime.get("fear_greed_value")
+        c4.metric("Fear & Greed", f"{fg:.0f} ({regime.get('fear_greed_bucket', '—')})" if isinstance(fg, (int, float)) else "n/a")
+        st.caption(
+            f"Breadth above 50d MA: {fmt_pct(regime.get('breadth_pct_above_50d_ma'))} · "
+            f"avg pairwise corr (60d, top 20): {fmt_num(regime.get('avg_pairwise_corr_60d_top20'), 2)} · "
+            f"BTC dominance: {regime.get('btc_dominance_trend', '—')}"
+        )
+    else:
+        st.info("No regime artifact yet under `data/strategies/`.")
+    proposal = load_json_file(DATA / "strategies" / "sleeve_allocation_proposal.json")
+    if proposal:
+        approved = bool(proposal.get("approved", False))
+        status_txt = "APPROVED" if approved else "PROPOSAL — not approved, never auto-executed"
+        st.write(
+            f"Sleeve allocation **{status_txt}** · as of `{proposal.get('as_of', 'n/a')}` · "
+            f"regime `{proposal.get('regime', 'n/a')}` · proposed cash {fmt_pct(proposal.get('cash_weight'))}"
+        )
+        pt_manifest = load_json_file(DATA / "papertrade" / "papertrade_manifest.json") or {}
+        pt_books = pt_manifest.get("books") or {}
+        sleeve_rows = [
+            {
+                "Sleeve": name,
+                "Base weight": fmt_pct(info.get("base_weight")),
+                "Proposed weight": fmt_pct(info.get("proposed_weight")),
+                "Sortino (90d)": fmt_num(info.get("sortino_90d"), 2),
+                "Return source": info.get("return_source", "—"),
+                "Paper NAV": f"${(pt_books.get(name) or {}).get('nav'):,.0f}"
+                             if isinstance((pt_books.get(name) or {}).get("nav"), (int, float)) else "—",
+            }
+            for name, info in sorted((proposal.get("sleeves") or {}).items())
+        ]
+        st.dataframe(pd.DataFrame(sleeve_rows), use_container_width=True, hide_index=True)
+        if proposal.get("note"):
+            st.caption(proposal["note"])
+    else:
+        st.info("No sleeve allocation proposal yet under `data/strategies/`.")
+
+    # ---- Monitoring ---------------------------------------------------------------
+    st.subheader("Monitoring")
+    mon_dir = DATA / "reports" / "monitoring"
+    monitor_names = [
+        "data_quality", "signal_health", "execution_quality", "model_decay",
+        "risk_report", "shadow_nav", "watchdog", "champion_challenger",
+    ]
+    mod_rows, alert_rows = [], []
+    for name in monitor_names:
+        rep = load_json_file(mon_dir / f"{name}.json")
+        if rep is None:
+            continue
+        status = str(rep.get("status", "unknown"))
+        alerts = [str(a) for a in (rep.get("alerts") or [])]
+        mod_rows.append({"Module": name, "Status": status, "Alerts": len(alerts)})
+        severity = "alert" if status == "alert" else ("warn" if status == "warn" else "info")
+        for msg in alerts:
+            alert_rows.append({"Module": name, "Severity": severity, "Message": msg})
+    if not mod_rows:
+        st.info("No monitoring reports yet — run `python3 main.py monitor`.")
+    else:
+        verdict = load_json_file(DATA / "readiness" / "daily_quality_verdict.json") or {}
+        n_alerting = sum(1 for r in mod_rows if r["Status"] == "alert")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Modules reporting", str(len(mod_rows)))
+        c2.metric("Modules alerting", str(n_alerting))
+        c3.metric("Daily quality verdict", str(verdict.get("status", "n/a")))
+        st.dataframe(pd.DataFrame(mod_rows), use_container_width=True, hide_index=True)
+        if alert_rows:
+            st.write(f"Open alerts ({len(alert_rows)})")
+            st.dataframe(pd.DataFrame(alert_rows), use_container_width=True, hide_index=True)
+        else:
+            st.success("No open monitoring alerts.")
+    st.caption(
+        "Fund operations update via `python3 main.py nav` (accounting), "
+        "`python3 main.py monitor` (monitoring suite) and `python3 main.py letter` "
+        "(monthly letter under `artifacts/letters/`)."
+    )
 
 elif page == "Project Explorer":
     st.header("Project Explorer")

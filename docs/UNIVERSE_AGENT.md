@@ -372,7 +372,7 @@ in cmc_id modes. Timestamps are UTC-aware.
 
 ### CoinMarketCap Pro API — current key is **Hobbyist** (`CMC_API_KEY`)
 - Rate 300 req/min; ~150,000 credits/month.
-- `v2/cryptocurrency/quotes/historical` — ✅ **36 months** of daily price/mcap/vol.
+- `v3/cryptocurrency/quotes/historical` — ✅ **36 months** of daily price/mcap/vol.
 - `v1/cryptocurrency/listings/historical` — ❌ **1 month only** (HTTP 400, "plan allows
   1 months"). Binding limit for the *Pro* PIT-membership path → `cmc_listings_*` modes
   are shallow on Hobbyist.

@@ -141,6 +141,12 @@ class PortfolioAgent(AgentBase):
         leader_path = _resolve(self._project_root, self._pcfg.get("leaderboard_path", "data/predictions/model_leaderboard.parquet"))
         market_path = _resolve(self._project_root, self._pcfg.get("market_path", "data/raw/market/market_ohlcv.parquet"))
         manifest_path = self._project_root / "data" / "predictions" / "model_manifest.json"
+        if not pred_path.exists() and pred_path.name == "model_predictions_portfolio_input.parquet":
+            # Sanitized export absent (older runs/fixtures): fall back to the
+            # legacy file; the forbidden-column guard below still applies.
+            legacy = pred_path.with_name("model_predictions.parquet")
+            if legacy.exists():
+                pred_path = legacy
         for required in [pred_path, market_path]:
             if not required.exists():
                 raise FileNotFoundError(f"Required portfolio input missing: {required}")

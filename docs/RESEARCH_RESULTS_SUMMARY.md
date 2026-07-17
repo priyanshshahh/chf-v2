@@ -160,6 +160,20 @@ Required limitation:
 
 > Results are conditional on the latest eligible survivor universe and may overstate historical tradability because full historical membership and delisting data are not yet modeled.
 
+## Interpreting the Null Result (2026-07 update)
+
+A statistically overwhelming signal and a null economic result are not a contradiction. They are separable quantities, and keeping them separate is exactly what this pipeline is built to do.
+
+- **The cross-sectional ranking signal is real.** In the walk-forward signal screen (`data/predictions/alpha_model_leaderboard.parquet`), the strongest configuration — `elastic_net / market_only / 30d` — reaches a mean Rank IC of `0.1271` at a t-statistic of `9.60` across folds (`signal_gate_passed = true`, `alpha_backtest_status = not_run`), with the leading candidates clustered at t ≈ 4.4–9.6. A t-stat near 9.6 corresponds to p ≈ 10⁻²¹: the signal's correlation with forward cross-sectional returns is not in question.
+- **No configuration converts that signal into verified alpha.** Every candidate that clears the signal gate still returns `alpha_verified = false` after portfolio construction, transaction costs and benchmark comparison. Statistical significance (a Rank IC t-stat) and economic significance (alpha over disciplined benchmarks) are independent quantities.
+
+Two structural constraints — not signal absence — are the leading explanations, and both are testable:
+
+1. **The long-only constraint is binding.** The edge is a cross-sectional *ranking*; its information lives in the market-neutral subspace `{w : Σwᵢ = 0}`. A long-only book cannot occupy that subspace — it is forced to β ≈ 1 and inherits the market's direction. In the canonical window the equal-weight universe fell −46.4%, so a long-only expression of a good ranking still loses money. Falsifiable prediction: a **long/short** variant should recover the ranking's value.
+2. **The out-of-sample window is a single regime.** The canonical backtest (2025-03-25 → 2026-05-12) is ~14 months of a predominantly bear tape — precisely the regime in which cross-sectional momentum is known to underperform. The 2021 bull run, the 2022 crash and the 2023–24 recovery all sit inside the training split, never tested out-of-sample. Widening the walk-forward (≈14 → ≈50 folds) walks the OOS start back toward 2022 and spans bull + crash + recovery.
+
+Neither constraint is an excuse; each is a concrete next experiment the current artifacts already justify. The honest summary is narrow and defensible: **under a long-only book evaluated over a single bear-market regime at 20 bps costs, a signal significant at p ≈ 10⁻²¹ produced no tradable alpha.** That is a result about the constraint set, not a verdict on the signal.
+
 ## Final Conclusion
 
 No verified alpha found under tested configurations.

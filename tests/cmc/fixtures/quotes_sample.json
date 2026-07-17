@@ -1,0 +1,63 @@
+{
+  "status": {"error_code": 0, "error_message": null},
+  "data": {
+    "1": {
+      "id": 1,
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "quotes": [
+        {
+          "timestamp": "2026-06-01T00:00:00.000Z",
+          "quote": {
+            "USD": {
+              "price": 68000.5,
+              "market_cap": 1340000000000.0,
+              "volume_24h": 25000000000.0,
+              "timestamp": "2026-06-01T00:00:00.000Z"
+            }
+          }
+        },
+        {
+          "timestamp": "2026-06-02T00:00:00.000Z",
+          "quote": {
+            "USD": {
+              "price": 68550.25,
+              "market_cap": 1351000000000.0,
+              "volume_24h": 26100000000.0,
+              "timestamp": "2026-06-02T00:00:00.000Z"
+            }
+          }
+        }
+      ]
+    },
+    "4172": {
+      "id": 4172,
+      "name": "Terra Classic",
+      "symbol": "LUNC",
+      "quotes": [
+        {
+          "timestamp": "2026-06-01T00:00:00.000Z",
+          "quote": {
+            "USD": {
+              "price": 5.8e-05,
+              "market_cap": 320000000.0,
+              "volume_24h": 12000000.0,
+              "timestamp": "2026-06-01T00:00:00.000Z"
+            }
+          }
+        },
+        {
+          "timestamp": "2026-06-02T00:00:00.000Z",
+          "quote": {
+            "USD": {
+              "price": 5.9e-05,
+              "market_cap": 325000000.0,
+              "volume_24h": 11500000.0,
+              "timestamp": "2026-06-02T00:00:00.000Z"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

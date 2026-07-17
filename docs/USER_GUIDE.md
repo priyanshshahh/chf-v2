@@ -7,8 +7,8 @@ This guide explains how to set up and run CHF from a clean local checkout. CHF i
 Clone the repository and enter it:
 
 ```bash
-git clone https://github.com/priyanshshahh/chf.git
-cd chf
+git clone https://github.com/priyanshshahh/chf-v2.git
+cd chf-v2
 ```
 
 Create and activate a Python virtual environment:

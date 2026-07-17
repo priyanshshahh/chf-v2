@@ -1,0 +1,28 @@
+{
+  "alpha_verified": false,
+  "best_strategy_by_sharpe": "top_5_vol_scaled",
+  "diagnostic_note": "",
+  "survivorship_limitation": "Results are conditional on the latest eligible survivor universe and may overstate historical tradability because full historical membership and delisting data are not yet modeled.",
+  "n_strategies": 9,
+  "n_experiments": 201,
+  "n_benchmarks": 5,
+  "transaction_cost_bps": 20.0,
+  "cost_sweep_bps": [
+    0,
+    10,
+    20,
+    50,
+    100
+  ],
+  "benchmark_sanity_passed": true,
+  "best_rank_ic": 0.12710398660852051,
+  "onchain_features_help": false,
+  "onchain_marginal_ic_lift": -0.002654,
+  "window_start": "2025-03-25",
+  "window_end": "2026-05-12",
+  "n_days": 414,
+  "universe_size": 233,
+  "universe_snapshots": 66,
+  "avg_eligible": 100.0,
+  "market_symbols": 237
+}

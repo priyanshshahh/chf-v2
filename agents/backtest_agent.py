@@ -632,6 +632,20 @@ class BacktestAgent(AgentBase):
             "passed_sanity": True,
             "failure_reason": "",
         }
+        # A benchmark that holds assets but never sees a valid price (or whose
+        # series is completely flat over a long window) is degenerate — its
+        # comparisons are meaningless and must not silently pass. Cash-style
+        # benchmarks (no asset weights) are legitimately flat.
+        holds_assets = bool((effective_weights > 0).any().any()) if not effective_weights.empty else False
+        # NOTE: valid_price_days counts days where ALL constituents are valid —
+        # legitimately 0 for wide baskets containing dead coins. Degeneracy
+        # means no asset EVER has a valid price in the window.
+        if holds_assets and sanity["average_assets_with_valid_prices"] == 0.0:
+            sanity["passed_sanity"] = False
+            sanity["failure_reason"] = "no_valid_price_days"
+        elif holds_assets and sanity["n_days"] > 30 and sanity["total_return"] == 0.0:
+            sanity["passed_sanity"] = False
+            sanity["failure_reason"] = "flat_benchmark_series"
         return equity_df, perf, sanity
 
     def _rebalance_anchor_dates(self, frequency: str) -> List[pd.Timestamp]:
@@ -1019,7 +1033,12 @@ class BacktestAgent(AgentBase):
                 raise BacktestAgentError(f"{key} is empty before persist")
         sanity = result["benchmark_sanity_report"]
         if self._bt_cfg.get("fail_on_benchmark_sanity_failure", True) and not sanity["passed_sanity"].fillna(False).all():
-            raise BacktestAgentError("Benchmark sanity failure blocks backtest persistence")
+            failed = sanity[~sanity["passed_sanity"].fillna(False)]
+            detail = "; ".join(
+                f"{row['benchmark_name']}: {row.get('failure_reason') or 'unspecified'}"
+                for _, row in failed.iterrows()
+            )
+            raise BacktestAgentError(f"Benchmark sanity failure blocks backtest persistence ({detail})")
         comp = result["strategy_comparison"]
         diagnostic_modes = {"diagnostic_not_live_trading", "override_diagnostic", "leaderboard_missing_diagnostic"}
         allocation_mode = str(self._allocation_manifest.get("allocation_mode") or "")

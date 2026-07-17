@@ -1,0 +1,45 @@
+# Project CHF operational alert-delivery configuration.
+#
+# Consumed by monitoring/notifier.py (deterministic, NO LLM) and wired into
+# jobs/scheduler.py so monitoring-job alerts and watchdog reports are delivered.
+#
+# Secrets are NEVER stored here. Channel credentials come from environment
+# variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_TO,
+# WEBHOOK_URL). If a channel's env is unset it degrades to logged-only and the
+# scheduler never crashes.
+
+notifications:
+  # Master switch. When false, every alert is logged only (no network I/O).
+  enabled: true
+
+  # Only deliver alerts at/above this severity over network channels.
+  # Order: info < warn < critical. Lower-severity alerts are still logged.
+  min_severity: "warn"
+
+  # Prefix prepended to every alert subject line (helps inbox/Slack filtering).
+  subject_prefix: "[CHF]"
+
+  email:
+    enabled: true
+    # SMTP connection details are read from env; these are documentation only.
+    # host  -> SMTP_HOST
+    # port  -> SMTP_PORT   (default 587)
+    # user  -> SMTP_USER
+    # pass  -> SMTP_PASS
+    # from  -> SMTP_FROM   (falls back to SMTP_USER)
+    # to    -> SMTP_TO     (comma-separated list)
+    use_starttls: true
+    timeout_seconds: 20
+
+  webhook:
+    enabled: true
+    # Generic JSON POST to WEBHOOK_URL. The payload carries both a Slack/Mattermost
+    # -style {"text": ...} key and a Discord-style {"content": ...} key plus a
+    # structured {"attachments": ...} block, so one URL works for Slack, Discord,
+    # Mattermost, Telegram (via a bot proxy) and generic webhooks.
+    timeout_seconds: 20
+
+  # Deduplication: identical alerts are suppressed for this many hours so a
+  # monitor that fails every run does not spam the channel. State is tracked in
+  # logs/scheduler/alert_state.json by the scheduler.
+  dedup_ttl_hours: 12

@@ -1,0 +1,126 @@
+{
+  "n_features": 266,
+  "n_groups": 14,
+  "qa_pass": 266,
+  "by_group": [
+    {
+      "group": "cross_sectional_zscore",
+      "count": 110
+    },
+    {
+      "group": "onchain_missingness",
+      "count": 22
+    },
+    {
+      "group": "market_returns_momentum",
+      "count": 20
+    },
+    {
+      "group": "market_risk_liquidity",
+      "count": 18
+    },
+    {
+      "group": "onchain_defi",
+      "count": 16
+    },
+    {
+      "group": "onchain_network_activity",
+      "count": 16
+    },
+    {
+      "group": "market_risk",
+      "count": 12
+    },
+    {
+      "group": "onchain_supply_capital",
+      "count": 12
+    },
+    {
+      "group": "onchain_valuation",
+      "count": 12
+    },
+    {
+      "group": "market_drawdown",
+      "count": 8
+    },
+    {
+      "group": "market_mean_reversion",
+      "count": 6
+    },
+    {
+      "group": "market_quality",
+      "count": 6
+    },
+    {
+      "group": "market_beta",
+      "count": 4
+    },
+    {
+      "group": "market_range",
+      "count": 4
+    }
+  ],
+  "worst_coverage": [
+    {
+      "feature": "nvt_dex_proxy",
+      "group": "onchain_valuation",
+      "null_pct": 0.999660501810657
+    },
+    {
+      "feature": "nvt_dex_proxy",
+      "group": "onchain_valuation",
+      "null_pct": 0.999660501810657
+    },
+    {
+      "feature": "dex_volume_to_tvl",
+      "group": "market_risk_liquidity",
+      "null_pct": 0.9928382048629074
+    },
+    {
+      "feature": "dex_volume_to_tvl",
+      "group": "market_risk_liquidity",
+      "null_pct": 0.9928382048629074
+    },
+    {
+      "feature": "protocol_tvl_growth_30d",
+      "group": "onchain_defi",
+      "null_pct": 0.9920137092602173
+    },
+    {
+      "feature": "protocol_tvl_growth_30d",
+      "group": "onchain_defi",
+      "null_pct": 0.9920137092602173
+    },
+    {
+      "feature": "fees_to_tvl",
+      "group": "onchain_defi",
+      "null_pct": 0.9918682100362132
+    },
+    {
+      "feature": "protocol_tvl_usd",
+      "group": "onchain_defi",
+      "null_pct": 0.9918682100362132
+    },
+    {
+      "feature": "protocol_tvl_usd",
+      "group": "onchain_defi",
+      "null_pct": 0.9918682100362132
+    },
+    {
+      "feature": "fees_to_tvl",
+      "group": "onchain_defi",
+      "null_pct": 0.9918682100362132
+    },
+    {
+      "feature": "dex_volume_growth_30d",
+      "group": "market_risk_liquidity",
+      "null_pct": 0.990203052250388
+    },
+    {
+      "feature": "dex_volume_growth_30d",
+      "group": "market_risk_liquidity",
+      "null_pct": 0.990203052250388
+    }
+  ],
+  "avg_null_pct": 0.45570782394423714
+}

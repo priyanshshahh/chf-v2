@@ -1,0 +1,103 @@
+# Project CHF operational monitoring configuration.
+#
+# Shared by every module under monitoring/ (python -m monitoring.<name>).
+# This file is independent of configs/run_config.yaml on purpose: monitors are
+# read-only observers of the research pipeline and must never change it.
+
+paths:
+  market: "data/raw/market/market_ohlcv.parquet"
+  onchain: "data/raw/onchain/onchain_wide.parquet"
+  predictions: "data/predictions/model_predictions.parquet"
+  backtest_summary: "data/backtests/backtest_summary.json"
+  equity_curves: "data/backtests/equity_curves.parquet"
+  turnover_report: "data/backtests/turnover_report.parquet"
+  cost_sweep: "data/backtests/cost_sweep.parquet"
+  allocations: "data/allocations/allocations_top_5_equal_weight.parquet"
+  papertrade_dir: "data/papertrade"
+  reports_dir: "data/reports/monitoring"
+  readiness_verdict: "data/readiness/daily_quality_verdict.json"
+  memory_dir: "memory"
+
+data_quality:
+  market_max_staleness_days: 3          # fail beyond this
+  onchain_max_staleness_days: 10        # warn beyond this (known slow source)
+  onchain_staleness_severity: "warn"    # warn | fail
+  row_drop_warn_pct: 0.10               # latest-day rows vs 7-day baseline
+  row_drop_fail_pct: 0.30
+  baseline_days: 7
+  nan_close_warn: 0.01
+  nan_close_fail: 0.05
+  nan_volume_warn: 0.10
+  nan_volume_fail: 0.25
+  spike_sigma: 5.0                      # |daily log-return| > k * sigma
+  spike_sigma_window: 90                # per-symbol sigma estimation window
+  spike_lookback_days: 7                # only recent spikes are flagged
+  spike_warn_count: 1                   # >= this many recent spikes -> warn
+  coverage_drop_fail_pct: 0.10          # universe coverage drop vs baseline
+
+signal_health:
+  rolling_windows: [30, 90]
+  ic_floor_30d: 0.0                     # alert if mean 30d rank-IC below this
+  min_names_per_day: 5                  # min cross-section size for a daily IC
+  min_days: 20                          # min daily-IC observations per combo
+  sign_flip_min_reference_ic: 0.005     # |full-period IC| needed to call a flip
+
+model_decay:
+  book: "canonical_best_model"
+  backtest_strategy: "top_5_equal_weight"
+  tracking_error_window: 30
+  sharpe_window: 30
+  sharpe_delta_alert: -1.0              # alert if live 30d Sharpe - backtest Sharpe below this
+  cusum_k: 0.5                          # slack (in sigma units)
+  cusum_h: 5.0                          # decision threshold (in sigma units)
+  min_days: 10
+
+risk_report:
+  vol_window: 30
+  beta_window: 60
+  returns_lookback_days: 180
+  ewma_lambda: 0.94
+  max_drawdown_alert: -0.25             # alert if current drawdown below this
+  top_weight_alert: 0.60                # alert if a single position exceeds this
+  # static benchmark books are concentrated by construction
+  concentration_exclude_books: ["benchmark_btc", "benchmark_btc_eth_5050"]
+
+execution_quality:
+  turnover_creep_mult: 2.0              # alert if live per-rebalance turnover > 2x backtest
+  min_comparable_rebalances: 1
+  book_strategy_map:
+    canonical_best_model: "top_5_equal_weight"
+    ridge_30d_top5: "top_5_equal_weight"
+    lightgbm_14d_top20_vs: "top_20_vol_scaled"
+    rf_14d_top20_vs: "top_20_vol_scaled"
+  book_cost_bps:
+    default: 20
+
+shadow_nav:
+  divergence_alert_bps: 10.0
+
+champion_challenger:
+  champion_book: "canonical_best_model"
+  k_consecutive: 3
+  sharpe_window: 60
+  windows: [30, 60, 90]
+  min_obs: 15                           # min daily returns for a windowed metric
+  exclude_books: ["benchmark_btc", "benchmark_btc_eth_5050"]
+  state_file: "data/reports/monitoring/champion_challenger_state.json"
+
+watchdog:
+  # stage cadences mirror jobs/scheduler.py; manual stages never alert
+  cadence:
+    universe: "monthly"
+    market: "daily"
+    onchain: "daily"
+    features: "daily"
+    labels: "daily"
+    model: "weekly"
+    portfolio: "weekly"
+    papertrade: "daily"
+    backtest: "manual"          # BacktestAgent is never scheduled
+    alpha_research: "manual"
+  daily_max_age_days: 1
+  weekly_max_age_days: 7
+  monthly_max_age_days: 31
